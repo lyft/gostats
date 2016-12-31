@@ -132,7 +132,7 @@ Counters are an always incrementing stat. Counters implement the following inter
 type Counter interface {
 	Add(uint64)     // increment the counter by the argument's value.
 	Inc()           // increment the counter by 1.
-	Set(uint64)
+	Set(uint64)     // sets an internal counter value which will be written in the next flush. Its use is discouraged as it may break always incrementing semantics.
 	String() string // return the current value of the counter as a string.
 	Value() uint64  // return the current value of the counter as a uint64.
 }
