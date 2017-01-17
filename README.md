@@ -171,8 +171,9 @@ type Timer interface {
 
 Timers are added to a store, or a scope by using the `NewTimer(name string)` method.
 
-Timespan's can be used to measure spans of time. They measure time from the time they are allocated by a Timer with `AllocateSpan()`,
-until they call `Complete()`. When Complete is called the timespan is flushed.
+Timespans can be used to measure spans of time. They measure time from the time they are allocated by a Timer with `AllocateSpan()`,
+until they call `Complete()`. When `Complete()` is called the timespan is flushed. A Timespan can be flushed at function
+return by calling `Complete()` with golang's `defer` statement.
 
 ### Stats with Tags
 
