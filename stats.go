@@ -78,7 +78,7 @@ func NewDefaultStore() Store {
 		newStore = NewStore(NewNullSink(), true)
 	} else {
 		newStore = NewStore(NewTcpStatsdSink(), true)
-		go newStore.Start(time.NewTicker(5 * time.Second))
+		go newStore.Start(time.NewTicker(time.Duration(settings.FlushIntervalS) * time.Second))
 	}
 	return newStore
 }
