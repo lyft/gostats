@@ -30,6 +30,8 @@ type runtimeStats struct {
 	numGoroutine Gauge
 }
 
+// Returns a StatGenerator with common Go runtime stats like memory allocated,
+// total mallocs, total frees, etc.
 func NewRuntimeStats(scope Scope) StatGenerator {
 	ret := runtimeStats{}
 

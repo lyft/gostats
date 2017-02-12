@@ -14,6 +14,7 @@ const (
 	logOnEveryNDropped = 1000
 )
 
+// Returns a Sink that is backed by a go channel with a limit of 1000 messages.
 func NewTcpStatsdSink() Sink {
 	sink := &tcpStatsdSink{
 		outc: make(chan string, 1000),

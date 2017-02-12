@@ -11,55 +11,155 @@ import (
 	logger "github.com/Sirupsen/logrus"
 )
 
+// A Store holds statistics.
+// There are two options when creating a new store:
+//  create a store backed by a tcp_sink to statsd
+//  s := stats.NewDefaultStore()
+//  create a store with a user provided Sink
+//  s := stats.NewStore(sink, true)
+// Currently that only backing store supported is statsd via a TCP sink, https://github.com/lyft/gostats/blob/master/tcp_sink.go.
+// However, implementing other Sinks (https://github.com/lyft/gostats/blob/master/sink.go) should be simple.
+//
+// A store holds Counters, Gauges, and Timers. You can add unscoped Counters, Gauges, and Timers to the store
+// with:
+//  s := stats.NewDefaultStore()
+//  c := s.New[Counter|Gauge|Timer]("name")
 type Store interface {
+  // Flush Counters and Gauges to the Sink attached to the Store.
+	// To flush the store at a regular interval call the
+	//  Start(*time.Ticker)
+	// method on it.
+	//
+	// The store will flush either at the regular interval, or whenever
+	//  Flush()
+	// is called. Whenever the store is flushed,
+	// the store will call
+	//  GenerateStats()
+	// on all of its stat generators,
+	// and flush all the Counters and Gauges registered with it.
 	Flush()
+
+  // Start a timer for periodic stat Flushes.
 	Start(*time.Ticker)
+
+	// Add a StatGenerator to the Store that programatically generates stats.
 	AddStatGenerator(StatGenerator)
 	Scope
 }
 
+// Statistics are namespaced by a Scope.
+//  store := stats.NewDefaultStore()
+//  scope := stats.Scope("service")
+//  // the following counter will be emitted at the stats tree rooted at `service`.
+//  c := scope.NewCounter("success")
+// Additionally you can create subscopes:
+//  store := stats.NewDefaultStore()
+//  scope := stats.Scope("service")
+//  networkScope := scope.Scope("network")
+//  // the following counter will be emitted at the stats tree rooted at service.network.
+//  c := networkScope.NewCounter("requests")
 type Scope interface {
+	// Create a subscope.
 	Scope(name string) Scope
+
+	// Return the Scope's backing Store.
 	Store() Store
+
+	// Add a Counter to a store, or a scope.
 	NewCounter(name string) Counter
+
+	// Add a Counter with Tags to a store, or a scope.
 	NewCounterWithTags(name string, tags map[string]string) Counter
+
+	// Add a Gauge to a store, or a scope.
 	NewGauge(name string) Gauge
+
+	// Add a Gauge with Tags to a store, or a scope.
 	NewGaugeWithTags(name string, tags map[string]string) Gauge
+
+	// Add a Timer to a store, or a scope.
 	NewTimer(name string) Timer
+
+	// Add a Timer with Tags to a store, or a scope with Tags.
 	NewTimerWithTags(name string, tags map[string]string) Timer
 }
 
+// Counters are an always incrementing stat.
 type Counter interface {
+	// Increment the Counter by the argument's value.
 	Add(uint64)
+
+	// Increment the Counter by 1.
 	Inc()
+
+	// Sets an internal counter value which will be written in the next flush.
+	// Its use is discouraged as it may break the counter's "always incrementing" semantics.
 	Set(uint64)
+
+	// Return the current value of the Counter as a string.
 	String() string
+
+	// Return the current value of the Counter as a uint64.
 	Value() uint64
 }
 
+// Gauges are stats that can increment and decrement.
 type Gauge interface {
+	// Increment the Gauge by the argument's value.
 	Add(uint64)
+
+	// Decrement the Gauge by the argument's value.
 	Sub(uint64)
+
+	// Increment the Gauge by 1.
 	Inc()
+
+	// Decrement the Gauge by 1.
 	Dec()
+
+	// Set the Gauge to a value.
 	Set(uint64)
+
+	// Return the current value of the Gauge as a string.
 	String() string
+
+	// Return the current value of the Gauge as a uint64.
 	Value() uint64
 }
 
+// Timers can be used to flush timing statistics.
 type Timer interface {
+	// Flush the timer with the argument's value.
 	AddValue(float64)
+
+	// Allocate a Timespan.
 	AllocateSpan() Timespan
 }
 
+// Timespans can be used to measure spans of time.
+// They measure time from the time they are allocated by a Timer with
+//   AllocateSpan()
+// until they call
+//   Complete().
+// When Complete is called the timespan is flushed.
+//
+// A Timespan can be flushed at function
+// return by calling Complete with golang's defer statement.
 type Timespan interface {
+	// End the Timespan and flush it.
 	Complete()
 }
 
+// StatGenerators can be used to programatically generate stats.
+// StatGenerators are added to a store via
+//  AddStatGenerator(StatGenerator)
+// An example is https://github.com/lyft/gostats/blob/master/runtime.go.
 type StatGenerator interface {
+	// Runs the StatGenerator to generate Stats.
 	GenerateStats()
 }
 
+// Returns an Empty store that flushes to Sink passed as an argument.
 func NewStore(sink Sink, export bool) Store {
 	return &statStore{
 		counters: make(map[string]*counter),
@@ -70,6 +170,7 @@ func NewStore(sink Sink, export bool) Store {
 	}
 }
 
+// Returns a Store with a TCP statsd sink, and a running flush timer.
 func NewDefaultStore() Store {
 	var newStore Store
 	settings := GetSettings()
