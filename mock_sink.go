@@ -6,7 +6,7 @@ type mockSink struct {
 	Gauges   map[string]uint64
 }
 
-// Returns a Mock Sink that flushes stats to in memory maps.
+// NewMockSink returns a Mock Sink that flushes stats to in memory maps.
 func NewMockSink() (m *mockSink) {
 	m = &mockSink{
 		Counters: make(map[string]uint64),

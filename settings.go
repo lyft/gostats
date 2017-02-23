@@ -15,7 +15,7 @@ type Settings struct {
 	FlushIntervalS      int    `envconfig:"GOSTATS_FLUSH_INTERVAL_SECONDS" default:"5"`
 }
 
-// Returns the Settings gostats will run with.
+// GetSettings returns the Settings gostats will run with.
 func GetSettings() Settings {
 	var s Settings
 	err := envconfig.Process("", &s)

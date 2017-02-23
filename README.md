@@ -1,25 +1,3 @@
-<!-- START doctoc generated TOC please keep comment here to allow auto update -->
-<!-- DON'T EDIT THIS SECTION, INSTEAD RE-RUN doctoc TO UPDATE -->
-**Table of Contents**  *generated with [DocToc](https://github.com/thlorenz/doctoc)*
-
-- [Gostats](#gostats)
-  - [Overview](#overview)
-  - [Installation](#installation)
-  - [Building](#building)
-  - [Usage](#usage)
-    - [Settings](#settings)
-    - [Store](#store)
-      - [StatGenerators](#statgenerators)
-      - [Flushing](#flushing)
-    - [Scopes](#scopes)
-    - [Types of Stats](#types-of-stats)
-      - [Counters](#counters)
-      - [Gauges](#gauges)
-      - [Timers](#timers)
-    - [Stats with Tags](#stats-with-tags)
-
-<!-- END doctoc generated TOC please keep comment here to allow auto update -->
-
 # Gostats
 
 ## Overview
