@@ -5,6 +5,7 @@ import (
 	"strconv"
 )
 
+// NewStatHandler returns an http handler for stats.
 func NewStatHandler(scope Scope, handler http.Handler) http.Handler {
 	ret := statHandler{}
 	ret.scope = scope
