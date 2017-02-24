@@ -2,6 +2,7 @@ package stats
 
 type nullSink struct{}
 
+// NewNullSink returns a Sink that does not have a backing store attached to it.
 func NewNullSink() Sink {
 	return &nullSink{}
 }

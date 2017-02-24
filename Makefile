@@ -11,3 +11,5 @@ update:
 .PHONY: compile-test
 compile-test:
 	go test -cover -race $(shell glide nv)
+	gofmt -l .
+	go tool vet *.go
