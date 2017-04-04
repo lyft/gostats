@@ -25,7 +25,7 @@ import (
 //  s := stats.NewDefaultStore()
 //  c := s.New[Counter|Gauge|Timer]("name")
 type Store interface {
-  // Flush Counters and Gauges to the Sink attached to the Store.
+	// Flush Counters and Gauges to the Sink attached to the Store.
 	// To flush the store at a regular interval call the
 	//  Start(*time.Ticker)
 	// method on it.
@@ -39,7 +39,7 @@ type Store interface {
 	// and flush all the Counters and Gauges registered with it.
 	Flush()
 
-  // Start a timer for periodic stat Flushes.
+	// Start a timer for periodic stat Flushes.
 	Start(*time.Ticker)
 
 	// Add a StatGenerator to the Store that programatically generates stats.
@@ -71,17 +71,26 @@ type Scope interface {
 	// NewCounterWithTags adds a Counter with Tags to a store, or a scope.
 	NewCounterWithTags(name string, tags map[string]string) Counter
 
+	// NewPerInstanceCounter adds a Per instance Counter with optional Tags to a store, or a scope.
+	NewPerInstanceCounter(name string, tags map[string]string) Counter
+
 	// NewGauge adds a Gauge to a store, or a scope.
 	NewGauge(name string) Gauge
 
 	// NewGaugeWithTags adds a Gauge with Tags to a store, or a scope.
 	NewGaugeWithTags(name string, tags map[string]string) Gauge
 
+	// NewPerInstanceGauge adds a Per instance Gauge with optional Tags to a store, or a scope.
+	NewPerInstanceGauge(name string, tags map[string]string) Gauge
+
 	// NewTimer adds a Timer to a store, or a scope.
 	NewTimer(name string) Timer
 
 	// NewTimerWithTags adds a Timer with Tags to a store, or a scope with Tags.
 	NewTimerWithTags(name string, tags map[string]string) Timer
+
+	// NewPerInstanceTimer adds a Per instance Timer with optional Tags to a store, or a scope.
+	NewPerInstanceTimer(name string, tags map[string]string) Timer
 }
 
 // A Counter is an always incrementing stat.
@@ -357,6 +366,18 @@ func (registry *statStore) NewCounterWithTags(name string, tags map[string]strin
 	return registry.NewCounter(fmt.Sprintf("%s%s", name, serializedTags))
 }
 
+func (registry *statStore) NewPerInstanceCounter(name string, tags map[string]string) Counter {
+	if tags == nil {
+		tags = make(map[string]string, 1)
+	}
+
+	if _, found := tags["_f"]; !found {
+		tags["_f"] = "i"
+	}
+	serializedTags := serializeTags(tags)
+	return registry.NewCounter(fmt.Sprintf("%s%s", name, serializedTags))
+}
+
 func (registry *statStore) NewGauge(name string) Gauge {
 	registry.Lock()
 	defer registry.Unlock()
@@ -375,6 +396,18 @@ func (registry *statStore) NewGauge(name string) Gauge {
 }
 
 func (registry *statStore) NewGaugeWithTags(name string, tags map[string]string) Gauge {
+	serializedTags := serializeTags(tags)
+	return registry.NewGauge(fmt.Sprintf("%s%s", name, serializedTags))
+}
+
+func (registry *statStore) NewPerInstanceGauge(name string, tags map[string]string) Gauge {
+	if tags == nil {
+		tags = make(map[string]string, 1)
+	}
+
+	if _, found := tags["_f"]; !found {
+		tags["_f"] = "i"
+	}
 	serializedTags := serializeTags(tags)
 	return registry.NewGauge(fmt.Sprintf("%s%s", name, serializedTags))
 }
@@ -398,6 +431,18 @@ func (registry *statStore) NewTimerWithTags(name string, tags map[string]string)
 	return registry.NewTimer(fmt.Sprintf("%s%s", name, serializedTags))
 }
 
+func (registry *statStore) NewPerInstanceTimer(name string, tags map[string]string) Timer {
+	if tags == nil {
+		tags = make(map[string]string, 1)
+	}
+
+	if _, found := tags["_f"]; !found {
+		tags["_f"] = "i"
+	}
+	serializedTags := serializeTags(tags)
+	return registry.NewTimer(fmt.Sprintf("%s%s", name, serializedTags))
+}
+
 func (s subScope) Scope(name string) Scope {
 	return &subScope{registry: s.registry, name: fmt.Sprintf("%s.%s", s.name, name)}
 }
@@ -414,6 +459,10 @@ func (s subScope) NewCounterWithTags(name string, tags map[string]string) Counte
 	return s.registry.NewCounterWithTags(fmt.Sprintf("%s.%s", s.name, name), tags)
 }
 
+func (s subScope) NewPerInstanceCounter(name string, tags map[string]string) Counter {
+	return s.registry.NewPerInstanceCounter(fmt.Sprintf("%s.%s", s.name, name), tags)
+}
+
 func (s subScope) NewGauge(name string) Gauge {
 	return s.registry.NewGauge(fmt.Sprintf("%s.%s", s.name, name))
 }
@@ -422,10 +471,18 @@ func (s subScope) NewGaugeWithTags(name string, tags map[string]string) Gauge {
 	return s.registry.NewGaugeWithTags(fmt.Sprintf("%s.%s", s.name, name), tags)
 }
 
+func (s subScope) NewPerInstanceGauge(name string, tags map[string]string) Gauge {
+	return s.registry.NewPerInstanceGauge(fmt.Sprintf("%s.%s", s.name, name), tags)
+}
+
 func (s subScope) NewTimer(name string) Timer {
 	return s.registry.NewTimer(fmt.Sprintf("%s.%s", s.name, name))
 }
 
 func (s subScope) NewTimerWithTags(name string, tags map[string]string) Timer {
 	return s.registry.NewTimerWithTags(fmt.Sprintf("%s.%s", s.name, name), tags)
+}
+
+func (s subScope) NewPerInstanceTimer(name string, tags map[string]string) Timer {
+	return s.registry.NewPerInstanceTimer(fmt.Sprintf("%s.%s", s.name, name), tags)
 }
