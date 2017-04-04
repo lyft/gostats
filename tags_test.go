@@ -11,3 +11,11 @@ func TestSerializeTags(t *testing.T) {
 		t.Errorf("Serialized output (%s) didn't match expected output", serialized)
 	}
 }
+
+func TestSerializeWithPerInstanceFlag(t *testing.T) {
+	tags := map[string]string{"foo": "bar", "_f": "i"}
+	serialized := serializeTags(tags)
+	if serialized != ".___f=i.__foo=bar" {
+		t.Errorf("Serialized output (%s) didn't match expected output", serialized)
+	}
+}

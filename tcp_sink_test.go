@@ -2,6 +2,7 @@ package stats
 
 import (
 	"fmt"
+	"strings"
 	"testing"
 )
 
@@ -51,6 +52,52 @@ func TestCreateTaggedTimer(t *testing.T) {
 	}
 }
 
+func TestCreateInstanceTimer(t *testing.T) {
+	sink := &testStatSink{}
+	store := NewStore(sink, true)
+
+	t1 := store.NewPerInstanceTimer("hello", map[string]string{"t1": "v1"})
+	if t1 == nil {
+		t.Fatal("No timer returned")
+	}
+
+	t2 := store.NewPerInstanceTimer("hello", map[string]string{"t1": "v1"})
+	if t1 != t2 {
+		t.Error("A new timer with the same name was returned")
+	}
+
+	span := t2.AllocateSpan()
+	span.Complete()
+
+	expected := "hello.___f=i.__t1=v1"
+	if !strings.Contains(sink.record, expected) {
+		t.Errorf("Expected: '%s' Got: '%s'", expected, sink.record)
+	}
+}
+
+func TestCreateInstanceTimerNilMap(t *testing.T) {
+	sink := &testStatSink{}
+	store := NewStore(sink, true)
+
+	t1 := store.NewPerInstanceTimer("hello", nil)
+	if t1 == nil {
+		t.Fatal("No timer returned")
+	}
+
+	t2 := store.NewPerInstanceTimer("hello", map[string]string{"_f": "i"})
+	if t1 != t2 {
+		t.Error("A new timer with the same name was returned")
+	}
+
+	span := t2.AllocateSpan()
+	span.Complete()
+
+	expected := "hello.___f=i"
+	if !strings.Contains(sink.record, expected) {
+		t.Errorf("Expected: '%s' Got: '%s'", expected, sink.record)
+	}
+}
+
 func TestCreateDuplicateCounter(t *testing.T) {
 	sink := &testStatSink{}
 	store := NewStore(sink, true)
@@ -77,6 +124,40 @@ func TestCounter(t *testing.T) {
 	store.Flush()
 
 	expected := "c:12|c\n"
+	if expected != sink.record {
+		t.Errorf("Expected: '%s' Got: '%s'", expected, sink.record)
+	}
+}
+
+func TestTaggedPerInstanceCounter(t *testing.T) {
+	sink := &testStatSink{}
+	store := NewStore(sink, true)
+	scope := store.Scope("prefix")
+
+	counter := scope.NewPerInstanceCounter("c", map[string]string{"tag1": "value1"})
+	counter.Inc()
+	counter.Add(10)
+	counter.Inc()
+	store.Flush()
+
+	expected := "prefix.c.___f=i.__tag1=value1:12|c\n"
+	if expected != sink.record {
+		t.Errorf("Expected: '%s' Got: '%s'", expected, sink.record)
+	}
+}
+
+func TestTaggedPerInstanceCounterWithNilTags(t *testing.T) {
+	sink := &testStatSink{}
+	store := NewStore(sink, true)
+	scope := store.Scope("prefix")
+
+	counter := scope.NewPerInstanceCounter("c", nil)
+	counter.Inc()
+	counter.Add(10)
+	counter.Inc()
+	store.Flush()
+
+	expected := "prefix.c.___f=i:12|c\n"
 	if expected != sink.record {
 		t.Errorf("Expected: '%s' Got: '%s'", expected, sink.record)
 	}
@@ -143,6 +224,40 @@ func TestTaggedGauge(t *testing.T) {
 	store.Flush()
 
 	expected := "TestGauge.__tag1=v1:5|g\n"
+	if expected != sink.record {
+		t.Errorf("Expected: '%s' Got: '%s'", expected, sink.record)
+	}
+}
+
+func TestPerInstanceGauge(t *testing.T) {
+	sink := &testStatSink{}
+	store := NewStore(sink, true)
+
+	gauge := store.NewPerInstanceGauge("TestGauge", map[string]string{"tag1": "v1"})
+	gauge.Inc()
+	gauge.Add(10)
+	gauge.Dec()
+	gauge.Sub(5)
+	store.Flush()
+
+	expected := "TestGauge.___f=i.__tag1=v1:5|g\n"
+	if expected != sink.record {
+		t.Errorf("Expected: '%s' Got: '%s'", expected, sink.record)
+	}
+}
+
+func TestPerInstanceGaugeWithNilTags(t *testing.T) {
+	sink := &testStatSink{}
+	store := NewStore(sink, true)
+
+	gauge := store.NewPerInstanceGauge("TestGauge", nil)
+	gauge.Inc()
+	gauge.Add(10)
+	gauge.Dec()
+	gauge.Sub(5)
+	store.Flush()
+
+	expected := "TestGauge.___f=i:5|g\n"
 	if expected != sink.record {
 		t.Errorf("Expected: '%s' Got: '%s'", expected, sink.record)
 	}
