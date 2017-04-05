@@ -185,7 +185,8 @@ func NewDefaultStore() Store {
 	settings := GetSettings()
 	if !settings.UseStatsd {
 		logger.Warn("statsd is not in use")
-		newStore = NewStore(NewNullSink(), true)
+		newStore = NewStore(NewLoggingSink(), false)
+		go newStore.Start(time.NewTicker(10 * time.Second))
 	} else {
 		newStore = NewStore(NewTcpStatsdSink(), true)
 		go newStore.Start(time.NewTicker(time.Duration(settings.FlushIntervalS) * time.Second))
