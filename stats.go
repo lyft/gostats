@@ -299,12 +299,12 @@ type statStore struct {
 }
 
 func (s *statStore) Flush() {
+	s.Lock()
+	defer s.Unlock()
+
 	for _, g := range s.statGenerators {
 		g.GenerateStats()
 	}
-
-	s.Lock()
-	defer s.Unlock()
 
 	for name, cv := range s.counters {
 		value := cv.latch()
@@ -328,6 +328,9 @@ func (s *statStore) Start(ticker *time.Ticker) {
 }
 
 func (s *statStore) AddStatGenerator(statGenerator StatGenerator) {
+	s.Lock()
+	defer s.Unlock()
+
 	s.statGenerators = append(s.statGenerators, statGenerator)
 }
 
