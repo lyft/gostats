@@ -8,7 +8,7 @@ import (
 // Ensure flushing and adding generators does not race
 func TestStats(t *testing.T) {
 	sink := &testStatSink{}
-	store := NewStore(sink, false)
+	store := NewStore(sink, true)
 
 	scope := store.Scope("runtime")
 	g := NewRuntimeStats(scope)

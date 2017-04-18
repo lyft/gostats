@@ -358,7 +358,7 @@ func (registry *statStore) NewCounter(name string) Counter {
 	} else {
 		counterv = &counter{}
 		registry.counters[name] = counterv
-		if registry.export {
+		if registry.export && expvar.Get(name) == nil {
 			expvar.Publish(name, counterv)
 		}
 		return counterv
@@ -392,7 +392,7 @@ func (registry *statStore) NewGauge(name string) Gauge {
 	} else {
 		gaugev = &gauge{}
 		registry.gauges[name] = gaugev
-		if registry.export {
+		if registry.export && expvar.Get(name) == nil {
 			expvar.Publish(name, gaugev)
 		}
 		return gaugev
