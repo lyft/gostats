@@ -6,13 +6,13 @@ import "github.com/kelseyhightower/envconfig"
 // variables to setup its settings.
 type Settings struct {
 	// Use statsd as a stats sink.
-	UseStatsd           bool   `envconfig:"USE_STATSD" default:"true"`
+	UseStatsd bool `envconfig:"USE_STATSD" default:"true"`
 	// Address where statsd is running at.
-	StatsdHost          string `envconfig:"STATSD_HOST" default:"localhost"`
+	StatsdHost string `envconfig:"STATSD_HOST" default:"localhost"`
 	// Port where statsd is listening at.
-	StatsdPort          int    `envconfig:"STATSD_PORT" default:"8125"`
-  // Flushing interval.
-	FlushIntervalS      int    `envconfig:"GOSTATS_FLUSH_INTERVAL_SECONDS" default:"5"`
+	StatsdPort int `envconfig:"STATSD_PORT" default:"8125"`
+	// Flushing interval.
+	FlushIntervalS int `envconfig:"GOSTATS_FLUSH_INTERVAL_SECONDS" default:"5"`
 }
 
 // GetSettings returns the Settings gostats will run with.
