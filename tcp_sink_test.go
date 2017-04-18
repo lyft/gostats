@@ -3,23 +3,31 @@ package stats
 import (
 	"fmt"
 	"strings"
+	"sync"
 	"testing"
 )
 
 type testStatSink struct {
+	sync.Mutex
 	record string
 }
 
 func (s *testStatSink) FlushCounter(name string, value uint64) {
+	s.Lock()
 	s.record += fmt.Sprintf("%s:%d|c\n", name, value)
+	s.Unlock()
 }
 
 func (s *testStatSink) FlushGauge(name string, value uint64) {
+	s.Lock()
 	s.record += fmt.Sprintf("%s:%d|g\n", name, value)
+	s.Unlock()
 }
 
 func (s *testStatSink) FlushTimer(name string, value float64) {
+	s.Lock()
 	s.record += fmt.Sprintf("%s:%f|ms\n", name, value)
+	s.Unlock()
 }
 
 func TestCreateTimer(t *testing.T) {
