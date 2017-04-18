@@ -33,31 +33,29 @@ type runtimeStats struct {
 // NewRuntimeStats returns a StatGenerator with common Go runtime stats like memory allocated,
 // total mallocs, total frees, etc.
 func NewRuntimeStats(scope Scope) StatGenerator {
-	ret := runtimeStats{}
+	return runtimeStats{
+		alloc:      scope.NewGauge("alloc"),
+		totalAlloc: scope.NewCounter("totalAlloc"),
+		sys:        scope.NewGauge("sys"),
+		lookups:    scope.NewCounter("lookups"),
+		mallocs:    scope.NewCounter("mallocs"),
+		frees:      scope.NewCounter("frees"),
 
-	ret.alloc = scope.NewGauge("alloc")
-	ret.totalAlloc = scope.NewCounter("totalAlloc")
-	ret.sys = scope.NewGauge("sys")
-	ret.lookups = scope.NewCounter("lookups")
-	ret.mallocs = scope.NewCounter("mallocs")
-	ret.frees = scope.NewCounter("frees")
+		heapAlloc:    scope.NewGauge("heapAlloc"),
+		heapSys:      scope.NewGauge("heapSys"),
+		heapIdle:     scope.NewGauge("heapIdle"),
+		heapInuse:    scope.NewGauge("heapInuse"),
+		heapReleased: scope.NewGauge("heapReleased"),
+		heapObjects:  scope.NewGauge("heapObjects"),
 
-	ret.heapAlloc = scope.NewGauge("heapAlloc")
-	ret.heapSys = scope.NewGauge("heapSys")
-	ret.heapIdle = scope.NewGauge("heapIdle")
-	ret.heapInuse = scope.NewGauge("heapInuse")
-	ret.heapReleased = scope.NewGauge("heapReleased")
-	ret.heapObjects = scope.NewGauge("heapObjects")
+		nextGC:       scope.NewGauge("nextGC"),
+		lastGC:       scope.NewGauge("lastGC"),
+		pauseTotalNs: scope.NewCounter("pauseTotalNs"),
+		numGC:        scope.NewCounter("numGC"),
+		gcCPUPercent: scope.NewGauge("gcCPUPercent"),
 
-	ret.nextGC = scope.NewGauge("nextGC")
-	ret.lastGC = scope.NewGauge("lastGC")
-	ret.pauseTotalNs = scope.NewCounter("pauseTotalNs")
-	ret.numGC = scope.NewCounter("numGC")
-	ret.gcCPUPercent = scope.NewGauge("gcCPUPercent")
-
-	ret.numGoroutine = scope.NewGauge("numGoroutine")
-
-	return ret
+		numGoroutine: scope.NewGauge("numGoroutine"),
+	}
 }
 
 func (r runtimeStats) GenerateStats() {
