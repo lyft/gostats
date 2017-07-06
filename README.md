@@ -1,26 +1,24 @@
-# Gostats
+# Gostats [![GoDoc](https://godoc.org/github.com/lyft/gostats?status.svg)](https://godoc.org/github.com/lyft/gostats) [![Build Status](https://travis-ci.org/lyft/gostats.svg?branch=master)](https://travis-ci.org/lyft/gostats)
 
-## Overview
-
-Gostats is a Golang statistics library with support for Counters, Gauges, and Timers.
-For full documentation visit [gostats' go doc](https://godoc.org/github.com/lyft/gostats).
+`gostats` is a Go metrics library with support for Counters, Gauges, and Timers.
 
 ## Installation
 
-```
+```sh
 go get github.com/lyft/gostats
 ```
 
-## Building
+## Building & Testing
 
-```
-make bootstrap && make compile-test
+```sh
+make install 
+make test
 ```
 
 ## Usage
 
-In order to start using gostats, import it to your project with:
+In order to start using `gostats`, import it into your project with:
 
-```Go
+```go
 import "github.com/lyft/gostats"
 ```
