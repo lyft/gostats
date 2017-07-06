@@ -188,7 +188,7 @@ func NewDefaultStore() Store {
 		newStore = NewStore(NewLoggingSink(), false)
 		go newStore.Start(time.NewTicker(10 * time.Second))
 	} else {
-		newStore = NewStore(NewTcpStatsdSink(), true)
+		newStore = NewStore(NewTCPStatsdSink(), true)
 		go newStore.Start(time.NewTicker(time.Duration(settings.FlushIntervalS) * time.Second))
 	}
 	return newStore
@@ -364,19 +364,20 @@ func (s *statStore) NewCounter(name string) Counter {
 
 	if ok {
 		return c
-	} else {
-		c = &counter{}
-
-		s.countersMtx.Lock()
-		s.counters[name] = c
-		s.countersMtx.Unlock()
-
-		if s.export && expvar.Get(name) == nil {
-			expvar.Publish(name, c)
-		}
-
-		return c
 	}
+
+	c = &counter{}
+
+	s.countersMtx.Lock()
+	s.counters[name] = c
+	s.countersMtx.Unlock()
+
+	if s.export && expvar.Get(name) == nil {
+		expvar.Publish(name, c)
+	}
+
+	return c
+
 }
 
 func (s *statStore) NewCounterWithTags(name string, tags map[string]string) Counter {
@@ -403,19 +404,20 @@ func (s *statStore) NewGauge(name string) Gauge {
 
 	if ok {
 		return g
-	} else {
-		g = &gauge{}
-
-		s.gaugesMtx.Lock()
-		s.gauges[name] = g
-		s.gaugesMtx.Unlock()
-
-		if s.export && expvar.Get(name) == nil {
-			expvar.Publish(name, g)
-		}
-
-		return g
 	}
+
+	g = &gauge{}
+
+	s.gaugesMtx.Lock()
+	s.gauges[name] = g
+	s.gaugesMtx.Unlock()
+
+	if s.export && expvar.Get(name) == nil {
+		expvar.Publish(name, g)
+	}
+
+	return g
+
 }
 
 func (s *statStore) NewGaugeWithTags(name string, tags map[string]string) Gauge {
@@ -442,15 +444,16 @@ func (s *statStore) NewTimer(name string) Timer {
 
 	if ok {
 		return t
-	} else {
-		t = &timer{name: name, sink: s.sink}
-
-		s.timersMtx.Lock()
-		s.timers[name] = t
-		s.timersMtx.Unlock()
-
-		return t
 	}
+
+	t = &timer{name: name, sink: s.sink}
+
+	s.timersMtx.Lock()
+	s.timers[name] = t
+	s.timersMtx.Unlock()
+
+	return t
+
 }
 
 func (s *statStore) NewTimerWithTags(name string, tags map[string]string) Timer {

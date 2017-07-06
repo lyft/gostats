@@ -2,9 +2,9 @@ package stats
 
 import logger "github.com/Sirupsen/logrus"
 
-type loggingSink struct {
-}
+type loggingSink struct{}
 
+// NewLoggingSink returns a Sink that flushes stats to os.StdErr.
 func NewLoggingSink() Sink {
 	return &loggingSink{}
 }

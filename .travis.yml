@@ -1,6 +1,9 @@
 sudo:     required
 language: go
-go:       1.7.1
+go:
+  - 1.7.4
+  - 1.8.2
 
-install: make bootstrap
-script:  make compile-test
+before_install: mkdir -p $GOPATH/bin
+install:        make install
+script:         make lint test
