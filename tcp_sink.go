@@ -14,8 +14,8 @@ const (
 	logOnEveryNDropped = 1000
 )
 
-// NewTcpStatsdSink returns a Sink that is backed by a go channel with a limit of 1000 messages.
-func NewTcpStatsdSink() Sink {
+// NewTCPStatsdSink returns a Sink that is backed by a go channel with a limit of 1000 messages.
+func NewTCPStatsdSink() Sink {
 	sink := &tcpStatsdSink{
 		outc: make(chan string, 1000),
 	}
@@ -71,27 +71,27 @@ func (s *tcpStatsdSink) FlushTimer(name string, value float64) {
 	}
 }
 
-func (w *tcpStatsdSink) run() {
+func (s *tcpStatsdSink) run() {
 	settings := GetSettings()
 	var writer *bufio.Writer
 	var err error
 	for {
-		if w.conn == nil {
-			w.conn, err = net.Dial("tcp", fmt.Sprintf("%s:%d", settings.StatsdHost,
+		if s.conn == nil {
+			s.conn, err = net.Dial("tcp", fmt.Sprintf("%s:%d", settings.StatsdHost,
 				settings.StatsdPort))
 			if err != nil {
 				logger.Warnf("statsd connection error: %s", err)
 				time.Sleep(3 * time.Second)
 				continue
 			}
-			writer = bufio.NewWriter(w.conn)
+			writer = bufio.NewWriter(s.conn)
 		}
 
 		// Receive from the channel and check if the channel has been closed
-		metric, ok := <-w.outc
+		metric, ok := <-s.outc
 		if !ok {
 			logger.Warnf("Closing statsd client")
-			w.conn.Close()
+			s.conn.Close()
 			return
 		}
 
@@ -100,8 +100,8 @@ func (w *tcpStatsdSink) run() {
 
 		if err != nil {
 			logger.Warnf("Writing to statsd failed: %s", err)
-			_ = w.conn.Close() // Ignore close failures
-			w.conn = nil
+			_ = s.conn.Close() // Ignore close failures
+			s.conn = nil
 			writer = nil
 		}
 	}
