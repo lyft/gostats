@@ -47,5 +47,7 @@ func (h *statResponseWriter) WriteHeader(code int) {
 }
 
 func (h *statResponseWriter) Flush() {
-	h.delegate.Flush()
+	if flusher, ok := h.delegate.(http.Flusher); ok {
+		flusher.Flush()
+	}
 }
