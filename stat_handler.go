@@ -45,3 +45,7 @@ func (h *statResponseWriter) WriteHeader(code int) {
 	h.handler.scope.NewCounter(strconv.Itoa(code)).Inc()
 	h.delegate.WriteHeader(code)
 }
+
+func (h *statResponseWriter) Flush() {
+	h.delegate.Flush()
+}
