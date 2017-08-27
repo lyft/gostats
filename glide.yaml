@@ -1,4 +1,4 @@
 package: github.com/lyft/gostats
 import:
 - package: github.com/sirupsen/logrus
-  version: ~0.11.0
+  version: ~1.0.3
