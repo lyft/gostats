@@ -7,7 +7,7 @@ import (
 	"sync/atomic"
 	"time"
 
-	logger "github.com/Sirupsen/logrus"
+	logger "github.com/sirupsen/logrus"
 )
 
 const (

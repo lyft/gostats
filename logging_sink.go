@@ -1,6 +1,6 @@
 package stats
 
-import logger "github.com/Sirupsen/logrus"
+import logger "github.com/sirupsen/logrus"
 
 type loggingSink struct{}
 
