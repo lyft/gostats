@@ -20,12 +20,14 @@ func TestStats(t *testing.T) {
 
 	go func() {
 		store.AddStatGenerator(g)
+		store.NewCounter("test")
 		store.Flush()
 		wg.Done()
 	}()
 
 	go func() {
 		store.AddStatGenerator(g)
+		store.NewCounter("test")
 		store.Flush()
 		wg.Done()
 	}()
