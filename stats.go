@@ -366,15 +366,19 @@ func (s *statStore) NewCounter(name string) Counter {
 		return c
 	}
 
-	c = &counter{}
-
 	s.countersMtx.Lock()
-	s.counters[name] = c
-	s.countersMtx.Unlock()
+	c, ok = s.counters[name]
+	if ok {
+		s.countersMtx.Unlock()
+		return c
+	}
 
+	c = &counter{}
+	s.counters[name] = c
 	if s.export && expvar.Get(name) == nil {
 		expvar.Publish(name, c)
 	}
+	s.countersMtx.Unlock()
 
 	return c
 
