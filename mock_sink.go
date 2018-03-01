@@ -29,7 +29,6 @@ func NewMockSink() (m *MockSink) {
 func (m *MockSink) FlushCounter(name string, value uint64) {
 	m.cLock.Lock()
 	defer m.cLock.Unlock()
-
 	m.Counters[name] += value
 }
 
