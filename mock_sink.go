@@ -1,10 +1,16 @@
 package stats
 
+import "sync"
+
 // MockSink describes an in-memory Sink used for testing.
 type MockSink struct {
 	Counters map[string]uint64
 	Timers   map[string]uint64
 	Gauges   map[string]uint64
+
+	cLock sync.Mutex
+	tLock sync.Mutex
+	gLock sync.Mutex
 }
 
 // NewMockSink returns a MockSink that flushes stats to in-memory maps. An
@@ -21,15 +27,22 @@ func NewMockSink() (m *MockSink) {
 
 // FlushCounter satisfies the Sink interface.
 func (m *MockSink) FlushCounter(name string, value uint64) {
+	m.cLock.Lock()
+	defer m.cLock.Unlock()
+
 	m.Counters[name] += value
 }
 
 // FlushGauge satisfies the Sink interface.
 func (m *MockSink) FlushGauge(name string, value uint64) {
+	m.gLock.Lock()
+	defer m.gLock.Unlock()
 	m.Gauges[name] = value
 }
 
 // FlushTimer satisfies the Sink interface.
 func (m *MockSink) FlushTimer(name string, value float64) {
+	m.tLock.Lock()
+	defer m.tLock.Unlock()
 	m.Timers[name]++
 }
