@@ -149,14 +149,19 @@ type Timer interface {
 // They measure time from the time they are allocated by a Timer with
 //   AllocateSpan()
 // until they call
-//   Complete().
-// When Complete is called the timespan is flushed.
+//   Complete()
+// or
+//   CompleteWithDuration(time.Duration)
+// When either function is called the timespan is flushed.
 //
 // A Timespan can be flushed at function
 // return by calling Complete with golang's defer statement.
 type Timespan interface {
 	// End the Timespan and flush it.
 	Complete()
+
+	// End the Timespan and flush it. Adds additional time.Duration to the measured time
+	CompleteWithDuration(time.Duration)
 }
 
 // A StatGenerator can be used to programatically generate stats.
@@ -286,6 +291,10 @@ type timespan struct {
 
 func (ts *timespan) Complete() {
 	ts.timer.time(time.Now().Sub(ts.start))
+}
+
+func (ts *timespan) CompleteWithDuration(value time.Duration) {
+	ts.timer.time(value)
 }
 
 type statStore struct {

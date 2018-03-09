@@ -35,6 +35,21 @@ func TestStats(t *testing.T) {
 	wg.Wait()
 }
 
+// Ensure timers and timespans are working
+func TestTimer(t *testing.T) {
+	testDuration := time.Duration(9800000)
+	sink := &testStatSink{}
+	store := NewStore(sink, true)
+	store.NewTimer("test").AllocateSpan().CompleteWithDuration(testDuration)
+	store.Flush()
+
+	expected := "test:9800.000000|ms"
+	timer := sink.record
+	if timer != expected {
+		t.Error("wanted test:9800.000000|ms, got", timer)
+	}
+}
+
 var bmID = ""
 var bmVal = uint64(0)
 
