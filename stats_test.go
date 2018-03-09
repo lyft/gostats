@@ -46,7 +46,7 @@ func TestTimer(t *testing.T) {
 
 	expected := "test:98"
 	timer := sink.record
-	if strings.Contains(timer, expected) {
+	if !strings.Contains(timer, expected) {
 		t.Error("wanted timer value of 98 ms, got", timer)
 	}
 }
