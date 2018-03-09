@@ -41,6 +41,7 @@ func TestTimer(t *testing.T) {
 	sink := NewMockSink()
 	store := NewStore(sink, true)
 	store.NewTimer("test").AllocateSpan().CompleteWithDuration(testDuration)
+	store.NewTimer("test").AllocateSpan().CompleteWithDuration(testDuration)
 
 	expected := uint64(98)
 	timer, ok := sink.Timers["test"]
