@@ -3,10 +3,10 @@ package stats
 import (
 	"math/rand"
 	"strconv"
+	"strings"
 	"sync"
 	"testing"
 	"time"
-	"strings"
 )
 
 // Ensure flushing and adding generators does not race
@@ -36,7 +36,6 @@ func TestStats(t *testing.T) {
 	wg.Wait()
 }
 
-
 // Ensure timers and timespans are working
 func TestTimer(t *testing.T) {
 	testDuration := time.Duration(9800000)
@@ -47,7 +46,7 @@ func TestTimer(t *testing.T) {
 
 	expected := "test:98"
 	timer := sink.record
-	if strings.Contains(timer, expected)  {
+	if strings.Contains(timer, expected) {
 		t.Error("wanted timer value of 98 ms, got", timer)
 	}
 }
