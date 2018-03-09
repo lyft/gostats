@@ -46,7 +46,7 @@ func TestTimer(t *testing.T) {
 	expected := "test:9800.000000|ms"
 	timer := sink.record
 	if timer != expected {
-		t.Error("wanted 9800.000000|ms, got", timer)
+		t.Error("wanted test:9800.000000|ms, got", timer)
 	}
 }
 
