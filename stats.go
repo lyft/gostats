@@ -294,7 +294,7 @@ func (ts *timespan) Complete() {
 }
 
 func (ts *timespan) CompleteWithDuration(value time.Duration) {
-	ts.timer.time(time.Now().Add(value).Sub(ts.start))
+	ts.timer.time(time.Now().Sub(ts.start) + value)
 }
 
 type statStore struct {
