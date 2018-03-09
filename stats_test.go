@@ -37,12 +37,12 @@ func TestStats(t *testing.T) {
 
 // Ensure timers and timespans are working
 func TestTimer(t *testing.T) {
-	testDuration := time.Duration(1000)
+	testDuration := time.Duration(98000)
 	sink := NewMockSink()
 	store := NewStore(sink, true)
 	store.NewTimer("test").AllocateSpan().CompleteWithDuration(testDuration)
 
-	expected := uint64(1000)
+	expected := uint64(98)
 	timer, ok := sink.Timers["test"]
 	if !ok {
 		t.Errorf("wanted a %q timer, none found", "test")
