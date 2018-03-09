@@ -143,23 +143,25 @@ type Timer interface {
 
 	// AllocateSpan allocates a Timespan.
 	AllocateSpan() Timespan
-
-	// AllocateSpanElapsed allocates a Timespan which started sometime before.
-	AllocateSpanElapsed(int64) Timespan
 }
 
 // A Timespan is used to measure spans of time.
 // They measure time from the time they are allocated by a Timer with
 //   AllocateSpan()
 // until they call
-//   Complete().
-// When Complete is called the timespan is flushed.
+//   Complete()
+// or
+//   CompleteWithDuration(time.Duration)
+// When either function is called the timespan is flushed.
 //
 // A Timespan can be flushed at function
 // return by calling Complete with golang's defer statement.
 type Timespan interface {
 	// End the Timespan and flush it.
 	Complete()
+
+	// End the Timespan and flush it. Adds additional time.Duration to the measured time
+	CompleteWithDuration(time.Duration)
 }
 
 // A StatGenerator can be used to programatically generate stats.
@@ -282,10 +284,6 @@ func (t *timer) AllocateSpan() Timespan {
 	return &timespan{timer: t, start: time.Now()}
 }
 
-func (t *timer) AllocateSpanElapsed(elapsedTime int64) Timespan {
-	return &timespan{timer: t, start: time.Now().Add(time.Duration(-elapsedTime))}
-}
-
 type timespan struct {
 	timer *timer
 	start time.Time
@@ -293,6 +291,10 @@ type timespan struct {
 
 func (ts *timespan) Complete() {
 	ts.timer.time(time.Now().Sub(ts.start))
+}
+
+func (ts *timespan) CompleteWithDuration(value time.Duration) {
+	ts.timer.time(time.Now().Add(value).Sub(ts.start))
 }
 
 type statStore struct {
