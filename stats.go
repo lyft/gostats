@@ -143,6 +143,9 @@ type Timer interface {
 
 	// AllocateSpan allocates a Timespan.
 	AllocateSpan() Timespan
+
+	// AllocateSpanElapsed allocates a Timespan which started sometime before.
+	AllocateSpanElapsed(int64) Timespan
 }
 
 // A Timespan is used to measure spans of time.
@@ -277,6 +280,10 @@ func (t *timer) AddValue(value float64) {
 
 func (t *timer) AllocateSpan() Timespan {
 	return &timespan{timer: t, start: time.Now()}
+}
+
+func (t *timer) AllocateSpanElapsed(elapsedTime int64) Timespan {
+	return &timespan{timer: t, start: time.Now().Add(time.Duration(-elapsedTime))}
 }
 
 type timespan struct {
