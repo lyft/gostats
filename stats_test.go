@@ -6,6 +6,7 @@ import (
 	"sync"
 	"testing"
 	"time"
+	"strings"
 )
 
 // Ensure flushing and adding generators does not race
@@ -44,10 +45,10 @@ func TestTimer(t *testing.T) {
 	store.NewTimer("test").AllocateSpan().CompleteWithDuration(testDuration)
 	store.Flush()
 
-	expected := " test:9800.000000|ms"
+	expected := "test:98"
 	timer := sink.record
-	if timer != expected {
-		t.Error("wanted test:9800.000000|ms, got", timer)
+	if strings.Contains(timer, expected)  {
+		t.Error("wanted timer value of 98 ms, got", timer)
 	}
 }
 
