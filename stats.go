@@ -290,8 +290,10 @@ type timespan struct {
 	start time.Time
 }
 
-func (ts *timespan) Complete() {
-	ts.timer.time(time.Now().Sub(ts.start))
+func (ts *timespan) Complete() time.Duration {
+	d := time.Now().Sub(ts.start)
+	ts.timer.time(d)
+	return d
 }
 
 func (ts *timespan) CompleteWithDuration(value time.Duration) {
