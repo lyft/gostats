@@ -159,7 +159,7 @@ type Timer interface {
 // return by calling Complete with golang's defer statement.
 type Timespan interface {
 	// End the Timespan and flush it.
-	Complete()
+	Complete() time.Duration
 
 	// End the Timespan and flush it. Adds additional time.Duration to the measured time
 	CompleteWithDuration(time.Duration)
