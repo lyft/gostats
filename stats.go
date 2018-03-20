@@ -159,7 +159,7 @@ type Timer interface {
 // return by calling Complete with golang's defer statement.
 type Timespan interface {
 	// End the Timespan and flush it.
-	Complete()
+	Complete() time.Duration
 
 	// End the Timespan and flush it. Adds additional time.Duration to the measured time
 	CompleteWithDuration(time.Duration)
@@ -290,8 +290,10 @@ type timespan struct {
 	start time.Time
 }
 
-func (ts *timespan) Complete() {
-	ts.timer.time(time.Now().Sub(ts.start))
+func (ts *timespan) Complete() time.Duration {
+	d := time.Now().Sub(ts.start)
+	ts.timer.time(d)
+	return d
 }
 
 func (ts *timespan) CompleteWithDuration(value time.Duration) {
