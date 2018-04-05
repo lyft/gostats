@@ -274,7 +274,7 @@ type timer struct {
 }
 
 func (t *timer) time(dur time.Duration) {
-	t.sink.FlushTimer(t.name, float64(dur/time.Microsecond))
+	t.sink.FlushTimer(t.name, float64(dur/time.Millisecond))
 }
 
 func (t *timer) AddValue(value float64) {
