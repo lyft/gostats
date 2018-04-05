@@ -44,10 +44,10 @@ func TestTimer(t *testing.T) {
 	store.NewTimer("test").AllocateSpan().CompleteWithDuration(testDuration)
 	store.Flush()
 
-	expected := "test:9800.000000|ms"
+	expected := "test:9.000000|ms"
 	timer := sink.record
 	if !strings.Contains(timer, expected) {
-		t.Error("wanted timer value of test:9800.000000|ms, got", timer)
+		t.Error("wanted timer value of test:9.000000|ms, got", timer)
 	}
 }
 
