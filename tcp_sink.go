@@ -38,6 +38,7 @@ func (s *tcpStatsdSink) FlushCounter(name string, value uint64) {
 		new := atomic.AddUint64(&s.droppedCounters, 1)
 		if new%logOnEveryNDropped == 0 {
 			logger.WithField("total_dropped_records", new).
+				WithField("counter", name).
 				Error("statsd channel full, discarding counter flush value")
 		}
 	}
@@ -51,7 +52,8 @@ func (s *tcpStatsdSink) FlushGauge(name string, value uint64) {
 		new := atomic.AddUint64(&s.droppedGauges, 1)
 		if new%logOnEveryNDropped == 0 {
 			logger.WithField("total_dropped_records", new).
-				Error("statsd channel full, discarding guage flush value")
+				WithField("gauge", name).
+				Error("statsd channel full, discarding gauge flush value")
 		}
 	}
 }
@@ -63,6 +65,7 @@ func (s *tcpStatsdSink) FlushTimer(name string, value float64) {
 		new := atomic.AddUint64(&s.droppedTimers, 1)
 		if new%logOnEveryNDropped == 0 {
 			logger.WithField("total_dropped_records", new).
+				WithField("timer", name).
 				Error("statsd channel full, discarding timer flush value")
 		}
 	}
