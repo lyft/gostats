@@ -153,3 +153,22 @@ func BenchmarkParallelCounter(b *testing.B) {
 		}
 	})
 }
+
+func BenchmarkScopeAllocScaling(b *testing.B) {
+	const maxDepth = 100
+	for depth := 0; depth < maxDepth; depth++ {
+
+		store := NewStore(new(testStatSink), true)
+
+		b.Run("Scope Depth "+strconv.Itoa(depth), func(b *testing.B) {
+			b.ResetTimer()
+			for j := 0; j < b.N; j++ {
+				s := Scope(store)
+				for k := 0; k <= depth; k++ {
+					s = s.Scope("foo")
+				}
+				s.NewCounter("bar").Inc()
+			}
+		})
+	}
+}
