@@ -11,6 +11,7 @@ import (
 )
 
 const (
+	flushInterval      = time.Second
 	logOnEveryNDropped = 1000
 )
 
@@ -75,6 +76,9 @@ func (s *tcpStatsdSink) run() {
 	settings := GetSettings()
 	var writer *bufio.Writer
 	var err error
+
+	t := time.NewTimer(flushInterval)
+	defer t.Stop()
 	for {
 		if s.conn == nil {
 			s.conn, err = net.Dial("tcp", fmt.Sprintf("%s:%d", settings.StatsdHost,
@@ -87,22 +91,23 @@ func (s *tcpStatsdSink) run() {
 			writer = bufio.NewWriter(s.conn)
 		}
 
-		// Receive from the channel and check if the channel has been closed
-		metric, ok := <-s.outc
-		if !ok {
-			logger.Warnf("Closing statsd client")
-			s.conn.Close()
-			return
+		select {
+		case <-t.C:
+			if err := writer.Flush(); err != nil {
+				logger.Warnf("Writing to statsd failed: %s", err)
+				_ = s.conn.Close() // Ignore close failures
+				s.conn = nil
+				writer = nil
+			}
+		case metric, ok := <-s.outc:
+			// Receive from the channel and check if the channel has been closed
+			if !ok {
+				logger.Warnf("Closing statsd client")
+				s.conn.Close()
+				return
+			}
+			writer.WriteString(metric)
 		}
 
-		writer.WriteString(metric)
-		err = writer.Flush()
-
-		if err != nil {
-			logger.Warnf("Writing to statsd failed: %s", err)
-			_ = s.conn.Close() // Ignore close failures
-			s.conn = nil
-			writer = nil
-		}
 	}
 }
