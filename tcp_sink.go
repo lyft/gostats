@@ -12,6 +12,7 @@ import (
 
 const (
 	flushInterval      = time.Second
+	connBufferNumBytes = 1 << 16
 	logOnEveryNDropped = 1000
 )
 
@@ -77,8 +78,8 @@ func (s *tcpStatsdSink) run() {
 	var writer *bufio.Writer
 	var err error
 
-	t := time.NewTimer(flushInterval)
-	defer t.Stop()
+	idleFlusher := time.NewTimer(flushInterval)
+	defer idleFlusher.Stop()
 	for {
 		if s.conn == nil {
 			s.conn, err = net.Dial("tcp", fmt.Sprintf("%s:%d", settings.StatsdHost,
@@ -88,11 +89,13 @@ func (s *tcpStatsdSink) run() {
 				time.Sleep(3 * time.Second)
 				continue
 			}
-			writer = bufio.NewWriter(s.conn)
+			writer = bufio.NewWriterSize(s.conn, connBufferNumBytes)
 		}
 
 		select {
-		case <-t.C:
+		// ensures stats are eventually flushed in the case where an agent
+		// produces stats at an extremely low rate.
+		case <-idleFlusher.C:
 			if err := writer.Flush(); err != nil {
 				logger.Warnf("Writing to statsd failed: %s", err)
 				_ = s.conn.Close() // Ignore close failures
