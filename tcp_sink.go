@@ -55,21 +55,20 @@ func (s *tcpStatsdSink) flush(f string, args ...interface{}) {
 	s.mu.Lock()
 	_, err := fmt.Fprintf(s.flushBuf, f, args...)
 	if err != nil {
-		s.handleFlushError(err)
+		s.handleFlushError(err, s.flushBuf.Buffered())
 	}
 	s.mu.Unlock()
 }
 
 // s.mu should be held
-func (s *tcpStatsdSink) handleFlushError(err error) {
-	droppedBytes := uint64(s.flushBuf.Buffered())
-	if (s.droppedBytes+droppedBytes)%logOnEveryNDroppedBytes >
-		s.droppedBytes%logOnEveryNDroppedBytes {
-		logger.WithField("total_dropped_bytes", s.droppedBytes+droppedBytes).
-			WithField("dropped_bytes", droppedBytes).
+func (s *tcpStatsdSink) handleFlushError(err error, droppedBytes int) {
+	d := uint64(droppedBytes)
+	if (s.droppedBytes+d)%logOnEveryNDroppedBytes > s.droppedBytes%logOnEveryNDroppedBytes {
+		logger.WithField("total_dropped_bytes", s.droppedBytes+d).
+			WithField("dropped_bytes", d).
 			Error(err)
 	}
-	s.droppedBytes += droppedBytes
+	s.droppedBytes += d
 	s.flushBuf.Reset(sinkWriter{outc: s.outc})
 }
 
@@ -105,7 +104,7 @@ func (s *tcpStatsdSink) run() {
 		case <-t.C:
 			s.mu.Lock()
 			if err := s.flushBuf.Flush(); err != nil {
-				s.handleFlushError(err)
+				s.handleFlushError(err, s.flushBuf.Buffered())
 			}
 			s.mu.Unlock()
 		case buf, ok := <-s.outc: // Receive from the channel and check if the channel has been closed
@@ -119,9 +118,9 @@ func (s *tcpStatsdSink) run() {
 			if err != nil || n < len(buf) {
 				s.mu.Lock()
 				if err != nil {
-					s.handleFlushError(err)
+					s.handleFlushError(err, len(buf))
 				} else {
-					s.handleFlushError(fmt.Errorf("Short write to statsd. Resetting connection."))
+					s.handleFlushError(fmt.Errorf("Short write to statsd. Resetting connection."), len(buf)-n)
 				}
 				s.mu.Unlock()
 				_ = s.conn.Close() // Ignore close failures
