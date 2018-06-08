@@ -19,12 +19,23 @@ const (
 // that flushes those buffers to a statsd connection.
 func NewTCPStatsdSink() Sink {
 	outc := make(chan []byte, 1000)
-	sink := &tcpStatsdSink{
-		outc:     outc,
-		flushBuf: bufio.NewWriter(sinkWriter{outc: outc}),
+	writer := sinkWriter{
+		outc: outc,
 	}
-	go sink.run()
-	return sink
+	bufWriter := bufio.NewWriter(writer)
+	bufPool := &sync.Pool{
+		New: func() interface{} {
+			return make([]byte, bufWriter.Size())
+		},
+	}
+	s := &tcpStatsdSink{
+		outc:      outc,
+		bufWriter: bufWriter,
+		bufPool:   bufPool,
+	}
+	writer.bufPool = s.bufPool
+	go s.run()
+	return s
 }
 
 type tcpStatsdSink struct {
@@ -32,16 +43,18 @@ type tcpStatsdSink struct {
 	outc         chan []byte
 	droppedBytes uint64
 	mu           sync.Mutex
-	flushBuf     *bufio.Writer
+	bufWriter    *bufio.Writer
+	bufPool      *sync.Pool
 }
 
 type sinkWriter struct {
-	outc chan []byte
+	bufPool *sync.Pool
+	outc    chan<- []byte
 }
 
 func (w sinkWriter) Write(p []byte) (int, error) {
 	n := len(p)
-	pCopy := make([]byte, n)
+	pCopy := w.bufPool.Get().([]byte)
 	copy(pCopy, p)
 	select {
 	case w.outc <- pCopy:
@@ -53,9 +66,9 @@ func (w sinkWriter) Write(p []byte) (int, error) {
 
 func (s *tcpStatsdSink) flush(f string, args ...interface{}) {
 	s.mu.Lock()
-	_, err := fmt.Fprintf(s.flushBuf, f, args...)
+	_, err := fmt.Fprintf(s.bufWriter, f, args...)
 	if err != nil {
-		s.handleFlushError(err, s.flushBuf.Buffered())
+		s.handleFlushError(err, s.bufWriter.Buffered())
 	}
 	s.mu.Unlock()
 }
@@ -69,7 +82,11 @@ func (s *tcpStatsdSink) handleFlushError(err error, droppedBytes int) {
 			Error(err)
 	}
 	s.droppedBytes += d
-	s.flushBuf.Reset(sinkWriter{outc: s.outc})
+
+	s.bufWriter.Reset(sinkWriter{
+		bufPool: s.bufPool,
+		outc:    s.outc,
+	})
 }
 
 func (s *tcpStatsdSink) FlushCounter(name string, value uint64) {
@@ -103,8 +120,8 @@ func (s *tcpStatsdSink) run() {
 		select {
 		case <-t.C:
 			s.mu.Lock()
-			if err := s.flushBuf.Flush(); err != nil {
-				s.handleFlushError(err, s.flushBuf.Buffered())
+			if err := s.bufWriter.Flush(); err != nil {
+				s.handleFlushError(err, s.bufWriter.Buffered())
 			}
 			s.mu.Unlock()
 		case buf, ok := <-s.outc: // Receive from the channel and check if the channel has been closed
@@ -126,6 +143,7 @@ func (s *tcpStatsdSink) run() {
 				_ = s.conn.Close() // Ignore close failures
 				s.conn = nil
 			}
+			s.bufPool.Put(buf)
 		}
 	}
 }
