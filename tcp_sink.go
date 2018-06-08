@@ -55,7 +55,9 @@ type sinkWriter struct {
 func (w sinkWriter) Write(p []byte) (int, error) {
 	n := len(p)
 	pCopy := w.bufPool.Get().([]byte)
-	copy(pCopy, p)
+	if copy(pCopy, p) != len(p) {
+		panic("didn't copy all bytes! bufPool buffers are the wrong length")
+	}
 	select {
 	case w.outc <- pCopy:
 		return n, nil
