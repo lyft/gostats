@@ -120,7 +120,7 @@ func (s *tcpStatsdSink) run() {
 				if err != nil {
 					s.handleFlushError(err, len(buf))
 				} else {
-					s.handleFlushError(fmt.Errorf("Short write to statsd. Resetting connection."), len(buf)-n)
+					s.handleFlushError(fmt.Errorf("short write to statsd, resetting connection"), len(buf)-n)
 				}
 				s.mu.Unlock()
 				_ = s.conn.Close() // Ignore close failures
