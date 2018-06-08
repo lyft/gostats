@@ -4,105 +4,129 @@ import (
 	"bufio"
 	"fmt"
 	"net"
-	"sync/atomic"
+	"sync"
 	"time"
 
 	logger "github.com/sirupsen/logrus"
 )
 
 const (
-	logOnEveryNDropped = 1000
+	flushInterval           = time.Second
+	logOnEveryNDroppedBytes = 1 << 15 // Log once per 32kb of dropped stats
 )
 
-// NewTCPStatsdSink returns a Sink that is backed by a go channel with a limit of 1000 messages.
+// NewTCPStatsdSink returns a Sink that is backed by a buffered writer and a separate goroutine
+// that flushes those buffers to a statsd connection.
 func NewTCPStatsdSink() Sink {
+	outc := make(chan []byte, 1000)
 	sink := &tcpStatsdSink{
-		outc: make(chan string, 1000),
+		outc:     outc,
+		flushBuf: bufio.NewWriter(sinkWriter{outc: outc}),
 	}
 	go sink.run()
 	return sink
 }
 
 type tcpStatsdSink struct {
-	conn            net.Conn
-	outc            chan string
-	droppedTimers   uint64
-	droppedCounters uint64
-	droppedGauges   uint64
+	conn         net.Conn
+	outc         chan []byte
+	droppedBytes uint64
+	mu           sync.Mutex
+	flushBuf     *bufio.Writer
+}
+
+type sinkWriter struct {
+	outc chan []byte
+}
+
+func (w sinkWriter) Write(p []byte) (int, error) {
+	n := len(p)
+	pCopy := make([]byte, n)
+	copy(pCopy, p)
+	select {
+	case w.outc <- pCopy:
+		return n, nil
+	default:
+		return 0, fmt.Errorf("statsd channel full, dropping stats buffer with %d bytes", n)
+	}
+}
+
+func (s *tcpStatsdSink) flush(f string, args ...interface{}) {
+	s.mu.Lock()
+	_, err := fmt.Fprintf(s.flushBuf, f, args...)
+	if err != nil {
+		s.handleFlushError(err)
+	}
+	s.mu.Unlock()
+}
+
+// s.mu should be held
+func (s *tcpStatsdSink) handleFlushError(err error) {
+	droppedBytes := uint64(s.flushBuf.Buffered())
+	if (s.droppedBytes+droppedBytes)%logOnEveryNDroppedBytes >
+		s.droppedBytes%logOnEveryNDroppedBytes {
+		logger.WithField("total_dropped_bytes", s.droppedBytes+droppedBytes).
+			WithField("dropped_bytes", droppedBytes).
+			Error(err)
+	}
+	s.droppedBytes += droppedBytes
+	s.flushBuf.Reset(sinkWriter{outc: s.outc})
 }
 
 func (s *tcpStatsdSink) FlushCounter(name string, value uint64) {
-	select {
-	case s.outc <- fmt.Sprintf("%s:%d|c\n", name, value):
-	default:
-		new := atomic.AddUint64(&s.droppedCounters, 1)
-		if new%logOnEveryNDropped == 0 {
-			logger.WithField("total_dropped_records", new).
-				WithField("counter", name).
-				Error("statsd channel full, discarding counter flush value")
-		}
-	}
-
+	s.flush("%s:%d|c\n", name, value)
 }
 
 func (s *tcpStatsdSink) FlushGauge(name string, value uint64) {
-	select {
-	case s.outc <- fmt.Sprintf("%s:%d|g\n", name, value):
-	default:
-		new := atomic.AddUint64(&s.droppedGauges, 1)
-		if new%logOnEveryNDropped == 0 {
-			logger.WithField("total_dropped_records", new).
-				WithField("gauge", name).
-				Error("statsd channel full, discarding gauge flush value")
-		}
-	}
+	s.flush("%s:%d|g\n", name, value)
 }
 
 func (s *tcpStatsdSink) FlushTimer(name string, value float64) {
-	select {
-	case s.outc <- fmt.Sprintf("%s:%f|ms\n", name, value):
-	default:
-		new := atomic.AddUint64(&s.droppedTimers, 1)
-		if new%logOnEveryNDropped == 0 {
-			logger.WithField("total_dropped_records", new).
-				WithField("timer", name).
-				Error("statsd channel full, discarding timer flush value")
-		}
-	}
+	s.flush("%s:%f|ms\n", name, value)
 }
 
 func (s *tcpStatsdSink) run() {
 	settings := GetSettings()
-	var writer *bufio.Writer
-	var err error
+	t := time.NewTimer(flushInterval)
+	defer t.Stop()
 	for {
 		if s.conn == nil {
-			s.conn, err = net.Dial("tcp", fmt.Sprintf("%s:%d", settings.StatsdHost,
+			conn, err := net.Dial("tcp", fmt.Sprintf("%s:%d", settings.StatsdHost,
 				settings.StatsdPort))
 			if err != nil {
 				logger.Warnf("statsd connection error: %s", err)
 				time.Sleep(3 * time.Second)
 				continue
 			}
-			writer = bufio.NewWriter(s.conn)
+			s.conn = conn
 		}
 
-		// Receive from the channel and check if the channel has been closed
-		metric, ok := <-s.outc
-		if !ok {
-			logger.Warnf("Closing statsd client")
-			s.conn.Close()
-			return
-		}
+		select {
+		case <-t.C:
+			s.mu.Lock()
+			if err := s.flushBuf.Flush(); err != nil {
+				s.handleFlushError(err)
+			}
+			s.mu.Unlock()
+		case buf, ok := <-s.outc: // Receive from the channel and check if the channel has been closed
+			if !ok {
+				logger.Warnf("Closing statsd client")
+				s.conn.Close()
+				return
+			}
 
-		writer.WriteString(metric)
-		err = writer.Flush()
-
-		if err != nil {
-			logger.Warnf("Writing to statsd failed: %s", err)
-			_ = s.conn.Close() // Ignore close failures
-			s.conn = nil
-			writer = nil
+			n, err := s.conn.Write(buf)
+			if err != nil || n < len(buf) {
+				s.mu.Lock()
+				if err != nil {
+					s.handleFlushError(err)
+				} else {
+					s.handleFlushError(fmt.Errorf("Short write to statsd. Resetting connection."))
+				}
+				s.mu.Unlock()
+				_ = s.conn.Close() // Ignore close failures
+				s.conn = nil
+			}
 		}
 	}
 }
