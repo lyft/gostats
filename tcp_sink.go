@@ -2,6 +2,7 @@ package stats
 
 import (
 	"bufio"
+	"bytes"
 	"fmt"
 	"net"
 	"sync"
@@ -10,56 +11,59 @@ import (
 	logger "github.com/sirupsen/logrus"
 )
 
+// TODO(btc): add constructor that accepts functional options in order to allow
+// users to choose the constants that work best for them. (Leave the existing
+// c'tor for backwards compatibility)
+// e.g. `func NewTCPStatsdSinkWithOptions(opts ...Option) Sink`
+
 const (
 	flushInterval           = time.Second
 	logOnEveryNDroppedBytes = 1 << 15 // Log once per 32kb of dropped stats
+	defaultBufferSize       = 1 << 16
+	approxMaxMemBytes       = 1 << 22
+	chanSize                = approxMaxMemBytes / defaultBufferSize
 )
 
 // NewTCPStatsdSink returns a Sink that is backed by a buffered writer and a separate goroutine
 // that flushes those buffers to a statsd connection.
 func NewTCPStatsdSink() Sink {
-	outc := make(chan []byte, 1000)
+	outc := make(chan *bytes.Buffer, chanSize) // TODO(btc): parameterize
 	writer := sinkWriter{
 		outc: outc,
 	}
-	bufWriter := bufio.NewWriter(writer)
-	bufPool := &sync.Pool{
-		New: func() interface{} {
-			return make([]byte, bufWriter.Size())
-		},
-	}
+	bufWriter := bufio.NewWriterSize(&writer, defaultBufferSize) // TODO(btc): parameterize size
+	pool := newBufferPool(defaultBufferSize)
 	s := &tcpStatsdSink{
 		outc:      outc,
 		bufWriter: bufWriter,
-		bufPool:   bufPool,
+		pool:      pool,
 	}
-	writer.bufPool = s.bufPool
+	writer.pool = s.pool
 	go s.run()
 	return s
 }
 
 type tcpStatsdSink struct {
-	conn         net.Conn
-	outc         chan []byte
-	droppedBytes uint64
+	conn net.Conn
+	outc chan *bytes.Buffer
+	pool *bufferpool
+
 	mu           sync.Mutex
+	droppedBytes uint64
 	bufWriter    *bufio.Writer
-	bufPool      *sync.Pool
 }
 
 type sinkWriter struct {
-	bufPool *sync.Pool
-	outc    chan<- []byte
+	pool *bufferpool
+	outc chan<- *bytes.Buffer
 }
 
-func (w sinkWriter) Write(p []byte) (int, error) {
+func (w *sinkWriter) Write(p []byte) (int, error) {
 	n := len(p)
-	pCopy := w.bufPool.Get().([]byte)
-	if copy(pCopy, p) != len(p) {
-		panic("didn't copy all bytes! bufPool buffers are the wrong length")
-	}
+	dest := w.pool.Get()
+	dest.Write(p)
 	select {
-	case w.outc <- pCopy:
+	case w.outc <- dest:
 		return n, nil
 	default:
 		return 0, fmt.Errorf("statsd channel full, dropping stats buffer with %d bytes", n)
@@ -85,9 +89,9 @@ func (s *tcpStatsdSink) handleFlushError(err error, droppedBytes int) {
 	}
 	s.droppedBytes += d
 
-	s.bufWriter.Reset(sinkWriter{
-		bufPool: s.bufPool,
-		outc:    s.outc,
+	s.bufWriter.Reset(&sinkWriter{
+		pool: s.pool,
+		outc: s.outc,
 	})
 }
 
@@ -133,19 +137,41 @@ func (s *tcpStatsdSink) run() {
 				return
 			}
 
-			n, err := s.conn.Write(buf)
-			if err != nil || n < len(buf) {
+			lenbuf := len(buf.Bytes())
+			n, err := s.conn.Write(buf.Bytes())
+			if err != nil || n < lenbuf {
 				s.mu.Lock()
 				if err != nil {
-					s.handleFlushError(err, len(buf))
+					s.handleFlushError(err, lenbuf)
 				} else {
-					s.handleFlushError(fmt.Errorf("short write to statsd, resetting connection"), len(buf)-n)
+					s.handleFlushError(fmt.Errorf("short write to statsd, resetting connection"), lenbuf-n)
 				}
 				s.mu.Unlock()
 				_ = s.conn.Close() // Ignore close failures
 				s.conn = nil
 			}
-			s.bufPool.Put(buf)
+			s.pool.Put(buf)
 		}
 	}
+}
+
+type bufferpool struct {
+	pool sync.Pool
+}
+
+func newBufferPool(defaultSizeBytes int) *bufferpool {
+	p := new(bufferpool)
+	p.pool.New = func() interface{} {
+		return bytes.NewBuffer(make([]byte, 0, defaultSizeBytes))
+	}
+	return p
+}
+
+func (p *bufferpool) Put(b *bytes.Buffer) {
+	b.Reset()
+	p.pool.Put(b)
+}
+
+func (p *bufferpool) Get() *bytes.Buffer {
+	return p.pool.Get().(*bytes.Buffer)
 }
