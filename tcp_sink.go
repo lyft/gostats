@@ -11,6 +11,8 @@ import (
 )
 
 const (
+	flushInterval      = time.Second
+	connBufferNumBytes = 1 << 16
 	logOnEveryNDropped = 1000
 )
 
@@ -74,9 +76,12 @@ func (s *tcpStatsdSink) FlushTimer(name string, value float64) {
 func (s *tcpStatsdSink) run() {
 	settings := GetSettings()
 	var writer *bufio.Writer
-	var err error
+
+	idleFlusher := time.NewTimer(flushInterval)
+	defer idleFlusher.Stop()
 	for {
 		if s.conn == nil {
+			var err error
 			s.conn, err = net.Dial("tcp", fmt.Sprintf("%s:%d", settings.StatsdHost,
 				settings.StatsdPort))
 			if err != nil {
@@ -84,25 +89,28 @@ func (s *tcpStatsdSink) run() {
 				time.Sleep(3 * time.Second)
 				continue
 			}
-			writer = bufio.NewWriter(s.conn)
+			writer = bufio.NewWriterSize(s.conn, connBufferNumBytes)
 		}
 
-		// Receive from the channel and check if the channel has been closed
-		metric, ok := <-s.outc
-		if !ok {
-			logger.Warnf("Closing statsd client")
-			s.conn.Close()
-			return
+		select {
+		// ensures stats are eventually flushed in the case where an agent
+		// produces stats at an extremely low rate.
+		case <-idleFlusher.C:
+			if err := writer.Flush(); err != nil {
+				logger.Warnf("Writing to statsd failed: %s", err)
+				_ = s.conn.Close() // Ignore close failures
+				s.conn = nil
+				writer = nil
+			}
+		case metric, ok := <-s.outc:
+			// Receive from the channel and check if the channel has been closed
+			if !ok {
+				logger.Warnf("Closing statsd client")
+				s.conn.Close()
+				return
+			}
+			writer.WriteString(metric)
 		}
 
-		writer.WriteString(metric)
-		err = writer.Flush()
-
-		if err != nil {
-			logger.Warnf("Writing to statsd failed: %s", err)
-			_ = s.conn.Close() // Ignore close failures
-			s.conn = nil
-			writer = nil
-		}
 	}
 }
