@@ -76,12 +76,12 @@ func (s *tcpStatsdSink) FlushTimer(name string, value float64) {
 func (s *tcpStatsdSink) run() {
 	settings := GetSettings()
 	var writer *bufio.Writer
-	var err error
 
 	idleFlusher := time.NewTimer(flushInterval)
 	defer idleFlusher.Stop()
 	for {
 		if s.conn == nil {
+			var err error
 			s.conn, err = net.Dial("tcp", fmt.Sprintf("%s:%d", settings.StatsdHost,
 				settings.StatsdPort))
 			if err != nil {
