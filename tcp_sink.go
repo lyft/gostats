@@ -14,10 +14,11 @@ const (
 	logOnEveryNDropped = 1000
 )
 
-// NewTCPStatsdSink returns a Sink that is backed by a go channel with a limit of 1000 messages.
-func NewTCPStatsdSink() Sink {
+// NewTCPStatsdSink returns a Sink that is backed by a go channel with a limit of channelsize messages.
+// Default channel size is 1000.
+func NewTCPStatsdSink(channelSize int) Sink {
 	sink := &tcpStatsdSink{
-		outc: make(chan string, 1000),
+		outc: make(chan string, channelSize),
 	}
 	go sink.run()
 	return sink

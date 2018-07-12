@@ -13,6 +13,8 @@ type Settings struct {
 	StatsdPort int `envconfig:"STATSD_PORT" default:"8125"`
 	// Flushing interval.
 	FlushIntervalS int `envconfig:"GOSTATS_FLUSH_INTERVAL_SECONDS" default:"5"`
+	// Flushing interval.
+	StatsChannelSize int `envconfig:"GOSTATS_CHANNEL_SIZE_" default:"1000"`
 }
 
 // GetSettings returns the Settings gostats will run with.
