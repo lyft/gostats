@@ -2,6 +2,7 @@ package stats
 
 import (
 	"fmt"
+	"github.com/golang/mock/gomock"
 	"strings"
 	"sync"
 	"testing"
@@ -310,5 +311,25 @@ func TestStatGenerator(t *testing.T) {
 	expected := "TestRuntime.counter:123|c\nTestRuntime.gauge:456|g\n"
 	if expected != sink.record {
 		t.Errorf("Expected: '%s' Got: '%s'", expected, sink.record)
+	}
+}
+
+func NewTestObjects(t *testing.T) (*gomock.Controller, *Mockdialer, *Mockconn, *tcpStatsdSink) {
+	ctrl := gomock.NewController(t)
+	d := NewMockdialer(ctrl)
+	c := NewMockconn(ctrl)
+	c.EXPECT().Write(gomock.Any()).Times(10).DoAndReturn(func(buf []byte) (int, error) {
+		return len(buf), nil
+	})
+	d.EXPECT().Dial("tcp", gomock.Any()).Times(1).Return(c, nil)
+	s := newTCPStatsdSink(d, make(chan struct{}))
+	return ctrl, d, c, s
+}
+
+func TestFuckMe(t *testing.T) {
+	_, _, _, s := NewTestObjects(t)
+	for i := 0; i < 10; i++ {
+		s.FlushGauge("sup", 42)
+		<-s.writtenChan
 	}
 }
