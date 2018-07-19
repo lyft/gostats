@@ -109,7 +109,7 @@ func (s *tcpStatsdSink) FlushTimer(name string, value float64) {
 
 func (s *tcpStatsdSink) run() {
 	settings := GetSettings()
-	t := time.NewTimer(flushInterval)
+	t := time.NewTicker(flushInterval)
 	defer t.Stop()
 	for {
 		if s.conn == nil {
