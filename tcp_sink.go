@@ -27,6 +27,10 @@ const (
 // NewTCPStatsdSink returns a Sink that is backed by a buffered writer and a separate goroutine
 // that flushes those buffers to a statsd connection.
 func NewTCPStatsdSink() Sink {
+	return newTCPStatsdSink(&netDialer{}, nil)
+}
+
+func newTCPStatsdSink(d dialer, writtenChan chan struct{}) *tcpStatsdSink {
 	outc := make(chan *bytes.Buffer, chanSize) // TODO(btc): parameterize
 	writer := sinkWriter{
 		outc: outc,
@@ -34,23 +38,42 @@ func NewTCPStatsdSink() Sink {
 	bufWriter := bufio.NewWriterSize(&writer, defaultBufferSize) // TODO(btc): parameterize size
 	pool := newBufferPool(defaultBufferSize)
 	s := &tcpStatsdSink{
-		outc:      outc,
-		bufWriter: bufWriter,
-		pool:      pool,
+		dialer:      d,
+		outc:        outc,
+		bufWriter:   bufWriter,
+		pool:        pool,
+		writtenChan: writtenChan,
 	}
 	writer.pool = s.pool
 	go s.run()
 	return s
 }
 
+type conn interface {
+	Write(b []byte) (n int, err error)
+	Close() error
+}
+
+type dialer interface {
+	Dial(network, address string) (conn, error)
+}
+
+type netDialer struct{}
+
+func (d *netDialer) Dial(network, address string) (conn, error) {
+	return net.Dial(network, address)
+}
+
 type tcpStatsdSink struct {
-	conn net.Conn
-	outc chan *bytes.Buffer
-	pool *bufferpool
+	c      conn
+	dialer dialer
+	outc   chan *bytes.Buffer
+	pool   *bufferpool
 
 	mu           sync.Mutex
 	droppedBytes uint64
 	bufWriter    *bufio.Writer
+	writtenChan  chan struct{}
 }
 
 type sinkWriter struct {
@@ -112,19 +135,20 @@ func (s *tcpStatsdSink) run() {
 	t := time.NewTimer(flushInterval)
 	defer t.Stop()
 	for {
-		if s.conn == nil {
-			conn, err := net.Dial("tcp", fmt.Sprintf("%s:%d", settings.StatsdHost,
+		if s.c == nil {
+			c, err := s.dialer.Dial("tcp", fmt.Sprintf("%s:%d", settings.StatsdHost,
 				settings.StatsdPort))
 			if err != nil {
 				logger.Warnf("statsd connection error: %s", err)
 				time.Sleep(3 * time.Second)
 				continue
 			}
-			s.conn = conn
+			s.c = c
 		}
 
 		select {
 		case <-t.C:
+			t.Reset(time.Second)
 			s.mu.Lock()
 			if err := s.bufWriter.Flush(); err != nil {
 				s.handleFlushError(err, s.bufWriter.Buffered())
@@ -133,22 +157,26 @@ func (s *tcpStatsdSink) run() {
 		case buf, ok := <-s.outc: // Receive from the channel and check if the channel has been closed
 			if !ok {
 				logger.Warnf("Closing statsd client")
-				s.conn.Close()
+				s.c.Close()
 				return
 			}
 
 			lenbuf := len(buf.Bytes())
-			n, err := s.conn.Write(buf.Bytes())
+			n, err := s.c.Write(buf.Bytes())
+			if s.writtenChan != nil {
+				s.writtenChan <- struct{}{}
+			}
 			if err != nil || n < lenbuf {
 				s.mu.Lock()
 				if err != nil {
 					s.handleFlushError(err, lenbuf)
 				} else {
+					fmt.Println(lenbuf)
 					s.handleFlushError(fmt.Errorf("short write to statsd, resetting connection"), lenbuf-n)
 				}
 				s.mu.Unlock()
-				_ = s.conn.Close() // Ignore close failures
-				s.conn = nil
+				_ = s.c.Close() // Ignore close failures
+				s.c = nil
 			}
 			s.pool.Put(buf)
 		}
