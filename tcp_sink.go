@@ -24,9 +24,9 @@ const (
 	chanSize                = approxMaxMemBytes / defaultBufferSize
 )
 
-// NewTCPStatsdSink returns a Sink that is backed by a buffered writer and a separate goroutine
-// that flushes those buffers to a statsd connection.
-func NewTCPStatsdSink() Sink {
+// NewTCPStatsdSink returns a FlushableSink that is backed by a buffered writer
+// and a separate goroutine that flushes those buffers to a statsd connection.
+func NewTCPStatsdSink() FlushableSink {
 	outc := make(chan *bytes.Buffer, chanSize) // TODO(btc): parameterize
 	writer := sinkWriter{
 		outc: outc,
@@ -68,6 +68,14 @@ func (w *sinkWriter) Write(p []byte) (int, error) {
 	default:
 		return 0, fmt.Errorf("statsd channel full, dropping stats buffer with %d bytes", n)
 	}
+}
+
+func (s *tcpStatsdSink) Flush() {
+	s.mu.Lock()
+	if err := s.bufWriter.Flush(); err != nil {
+		s.handleFlushError(err, s.bufWriter.Buffered())
+	}
+	s.mu.Unlock()
 }
 
 func (s *tcpStatsdSink) flush(f string, args ...interface{}) {
@@ -125,11 +133,7 @@ func (s *tcpStatsdSink) run() {
 
 		select {
 		case <-t.C:
-			s.mu.Lock()
-			if err := s.bufWriter.Flush(); err != nil {
-				s.handleFlushError(err, s.bufWriter.Buffered())
-			}
-			s.mu.Unlock()
+			s.Flush()
 		case buf, ok := <-s.outc: // Receive from the channel and check if the channel has been closed
 			if !ok {
 				logger.Warnf("Closing statsd client")
