@@ -165,10 +165,13 @@ func (s *tcpStatsdSink) run() {
 			lenbuf := len(buf.Bytes())
 			n, err := s.conn.Write(buf.Bytes())
 
-			s.mu.Lock()
-			s.lastFlushTime = time.Now()
-			s.mu.Unlock()
-			s.flushCond.Broadcast()
+			if len(s.outc) == 0 {
+				// We've at least tried to write all the data we have. Wake up anyone waiting on flush.
+				s.mu.Lock()
+				s.lastFlushTime = time.Now()
+				s.mu.Unlock()
+				s.flushCond.Broadcast()
+			}
 
 			if err != nil || n < lenbuf {
 				s.mu.Lock()
