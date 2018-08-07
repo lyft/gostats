@@ -78,14 +78,15 @@ func (w *sinkWriter) Write(p []byte) (int, error) {
 
 func (s *tcpStatsdSink) Flush() {
 	now := time.Now()
-	err := s.flush()
-	if err != nil {
-		s.mu.Lock()
-		for now.After(s.lastFlushTime) {
-			s.flushCond.Wait()
-		}
-		s.mu.Unlock()
+	if err := s.flush(); err != nil {
+		// Not much we can do here; we don't know how/why we failed.
+		return
 	}
+	s.mu.Lock()
+	for now.After(s.lastFlushTime) {
+		s.flushCond.Wait()
+	}
+	s.mu.Unlock()
 }
 
 func (s *tcpStatsdSink) flush() error {
