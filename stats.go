@@ -343,6 +343,11 @@ func (s *statStore) Flush() {
 		s.sink.FlushGauge(name, value)
 	}
 	s.gaugesMtx.RUnlock()
+
+	flushableSink, ok := s.sink.(FlushableSink)
+	if ok {
+		flushableSink.Flush()
+	}
 }
 
 func (s *statStore) Start(ticker *time.Ticker) {

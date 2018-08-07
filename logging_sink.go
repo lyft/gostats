@@ -5,7 +5,7 @@ import logger "github.com/sirupsen/logrus"
 type loggingSink struct{}
 
 // NewLoggingSink returns a Sink that flushes stats to os.StdErr.
-func NewLoggingSink() Sink {
+func NewLoggingSink() FlushableSink {
 	return &loggingSink{}
 }
 
@@ -19,4 +19,8 @@ func (s *loggingSink) FlushGauge(name string, value uint64) {
 
 func (s *loggingSink) FlushTimer(name string, value float64) {
 	logger.Debugf("[gostats] flushing time %s: %f", name, value)
+}
+
+func (s *loggingSink) Flush() {
+	logger.Debugf("[gostats] Flush() called, all stats would be flushed")
 }

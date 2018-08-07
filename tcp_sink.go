@@ -24,19 +24,23 @@ const (
 	chanSize                = approxMaxMemBytes / defaultBufferSize
 )
 
-// NewTCPStatsdSink returns a Sink that is backed by a buffered writer and a separate goroutine
-// that flushes those buffers to a statsd connection.
-func NewTCPStatsdSink() Sink {
+// NewTCPStatsdSink returns a FlushableSink that is backed by a buffered writer
+// and a separate goroutine that flushes those buffers to a statsd connection.
+func NewTCPStatsdSink() FlushableSink {
 	outc := make(chan *bytes.Buffer, chanSize) // TODO(btc): parameterize
 	writer := sinkWriter{
 		outc: outc,
 	}
 	bufWriter := bufio.NewWriterSize(&writer, defaultBufferSize) // TODO(btc): parameterize size
 	pool := newBufferPool(defaultBufferSize)
+	mu := &sync.Mutex{}
+	flushCond := sync.NewCond(mu)
 	s := &tcpStatsdSink{
 		outc:      outc,
 		bufWriter: bufWriter,
 		pool:      pool,
+		mu:        mu,
+		flushCond: flushCond,
 	}
 	writer.pool = s.pool
 	go s.run()
@@ -48,9 +52,11 @@ type tcpStatsdSink struct {
 	outc chan *bytes.Buffer
 	pool *bufferpool
 
-	mu           sync.Mutex
-	droppedBytes uint64
-	bufWriter    *bufio.Writer
+	mu            *sync.Mutex
+	droppedBytes  uint64
+	bufWriter     *bufio.Writer
+	flushCond     *sync.Cond
+	lastFlushTime time.Time
 }
 
 type sinkWriter struct {
@@ -70,7 +76,31 @@ func (w *sinkWriter) Write(p []byte) (int, error) {
 	}
 }
 
-func (s *tcpStatsdSink) flush(f string, args ...interface{}) {
+func (s *tcpStatsdSink) Flush() {
+	now := time.Now()
+	if err := s.flush(); err != nil {
+		// Not much we can do here; we don't know how/why we failed.
+		return
+	}
+	s.mu.Lock()
+	for now.After(s.lastFlushTime) {
+		s.flushCond.Wait()
+	}
+	s.mu.Unlock()
+}
+
+func (s *tcpStatsdSink) flush() error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	err := s.bufWriter.Flush()
+	if err != nil {
+		s.handleFlushError(err, s.bufWriter.Buffered())
+		return err
+	}
+	return nil
+}
+
+func (s *tcpStatsdSink) flushString(f string, args ...interface{}) {
 	s.mu.Lock()
 	_, err := fmt.Fprintf(s.bufWriter, f, args...)
 	if err != nil {
@@ -96,15 +126,15 @@ func (s *tcpStatsdSink) handleFlushError(err error, droppedBytes int) {
 }
 
 func (s *tcpStatsdSink) FlushCounter(name string, value uint64) {
-	s.flush("%s:%d|c\n", name, value)
+	s.flushString("%s:%d|c\n", name, value)
 }
 
 func (s *tcpStatsdSink) FlushGauge(name string, value uint64) {
-	s.flush("%s:%d|g\n", name, value)
+	s.flushString("%s:%d|g\n", name, value)
 }
 
 func (s *tcpStatsdSink) FlushTimer(name string, value float64) {
-	s.flush("%s:%f|ms\n", name, value)
+	s.flushString("%s:%f|ms\n", name, value)
 }
 
 func (s *tcpStatsdSink) run() {
@@ -125,20 +155,24 @@ func (s *tcpStatsdSink) run() {
 
 		select {
 		case <-t.C:
-			s.mu.Lock()
-			if err := s.bufWriter.Flush(); err != nil {
-				s.handleFlushError(err, s.bufWriter.Buffered())
-			}
-			s.mu.Unlock()
+			s.flush()
 		case buf, ok := <-s.outc: // Receive from the channel and check if the channel has been closed
 			if !ok {
 				logger.Warnf("Closing statsd client")
 				s.conn.Close()
 				return
 			}
-
 			lenbuf := len(buf.Bytes())
 			n, err := s.conn.Write(buf.Bytes())
+
+			if len(s.outc) == 0 {
+				// We've at least tried to write all the data we have. Wake up anyone waiting on flush.
+				s.mu.Lock()
+				s.lastFlushTime = time.Now()
+				s.mu.Unlock()
+				s.flushCond.Broadcast()
+			}
+
 			if err != nil || n < lenbuf {
 				s.mu.Lock()
 				if err != nil {
