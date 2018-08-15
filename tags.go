@@ -3,13 +3,18 @@ package stats
 import (
 	"bytes"
 	"fmt"
+	"regexp"
 	"sort"
 )
 
 const (
-	tagPrefix = ".__"
-	tagSep    = "="
+	tagPrefix   = ".__"
+	tagSep      = "="
+	tagFailsafe = "_"
 )
+
+// illegalTagValueChars are loosely set to ensure we don't have statsd parse errors.
+var illegalTagValueChars = regexp.MustCompile(`[:|]`)
 
 type tagPair struct {
 	dimension string
@@ -25,6 +30,7 @@ func (t tagSet) Less(i, j int) bool { return t[i].dimension < t[j].dimension }
 func serializeTags(tags map[string]string) string {
 	tagPairs := make([]tagPair, 0, len(tags))
 	for tagKey, tagValue := range tags {
+		tagValue = illegalTagValueChars.ReplaceAllLiteralString(tagValue, tagFailsafe)
 		tagPairs = append(tagPairs, tagPair{tagKey, tagValue})
 	}
 	sort.Sort(tagSet(tagPairs))
