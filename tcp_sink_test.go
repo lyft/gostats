@@ -287,6 +287,46 @@ func TestScopes(t *testing.T) {
 	}
 }
 
+func TestScopesWithTags(t *testing.T) {
+	sink := &testStatSink{}
+	store := NewStore(sink, true)
+
+	ascope := store.ScopeWithTags("a", map[string]string{"x": "a", "y": "a"})
+	bscope := ascope.ScopeWithTags("b", map[string]string{"x": "b", "z": "b"})
+	counter := bscope.NewCounter("c")
+	counter.Inc()
+	timer := bscope.NewTimer("t")
+	timer.AddValue(1)
+	gauge := bscope.NewGauge("g")
+	gauge.Set(1)
+	store.Flush()
+
+	expected := "a.b.t.__x=b.__y=a.__z=b:1.000000|ms\na.b.c.__x=b.__y=a.__z=b:1|c\na.b.g.__x=b.__y=a.__z=b:1|g\n"
+	if expected != sink.record {
+		t.Errorf("Expected: '%s' Got: '%s'", expected, sink.record)
+	}
+}
+
+func TestScopesAndMetricsWithTags(t *testing.T) {
+	sink := &testStatSink{}
+	store := NewStore(sink, true)
+
+	ascope := store.ScopeWithTags("a", map[string]string{"x": "a", "y": "a"})
+	bscope := ascope.Scope("b")
+	counter := bscope.NewCounterWithTags("c", map[string]string{"x": "m", "z": "m"})
+	counter.Inc()
+	timer := bscope.NewTimerWithTags("t", map[string]string{"x": "m", "z": "m"})
+	timer.AddValue(1)
+	gauge := bscope.NewGaugeWithTags("g", map[string]string{"x": "m", "z": "m"})
+	gauge.Set(1)
+	store.Flush()
+
+	expected := "a.b.t.__x=m.__z=m:1.000000|ms\na.b.c.__x=m.__z=m:1|c\na.b.g.__x=m.__z=m:1|g\n"
+	if expected != sink.record {
+		t.Errorf("Expected: '%s' Got: '%s'", expected, sink.record)
+	}
+}
+
 type testStatGenerator struct {
 	counter Counter
 	gauge   Gauge
