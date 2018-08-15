@@ -62,6 +62,10 @@ type Scope interface {
 	// Scope creates a subscope.
 	Scope(name string) Scope
 
+	// ScopeWithTags creates a subscope with Tags to a store or scope. All child scopes and metrics
+	// will inherit these tags by default.
+	ScopeWithTags(name string, tags map[string]string) Scope
+
 	// Store returns the Scope's backing Store.
 	Store() Store
 
@@ -203,6 +207,7 @@ func NewDefaultStore() Store {
 type subScope struct {
 	registry *statStore
 	name     string
+	tags     map[string]string
 }
 
 type counter struct {
@@ -371,10 +376,21 @@ func (s *statStore) Store() Store {
 }
 
 func (s *statStore) Scope(name string) Scope {
-	return subScope{registry: s, name: name}
+	return s.ScopeWithTags(name, nil)
+}
+
+func (s *statStore) ScopeWithTags(name string, tags map[string]string) Scope {
+	return subScope{registry: s, name: name, tags: tags}
 }
 
 func (s *statStore) NewCounter(name string) Counter {
+	return s.NewCounterWithTags(name, nil)
+}
+
+func (s *statStore) NewCounterWithTags(name string, tags map[string]string) Counter {
+	serializedTags := serializeTags(tags)
+	name = fmt.Sprintf("%s%s", name, serializedTags)
+
 	s.countersMtx.RLock()
 	c, ok := s.counters[name]
 	s.countersMtx.RUnlock()
@@ -398,12 +414,6 @@ func (s *statStore) NewCounter(name string) Counter {
 	s.countersMtx.Unlock()
 
 	return c
-
-}
-
-func (s *statStore) NewCounterWithTags(name string, tags map[string]string) Counter {
-	serializedTags := serializeTags(tags)
-	return s.NewCounter(fmt.Sprintf("%s%s", name, serializedTags))
 }
 
 func (s *statStore) NewPerInstanceCounter(name string, tags map[string]string) Counter {
@@ -414,11 +424,18 @@ func (s *statStore) NewPerInstanceCounter(name string, tags map[string]string) C
 	if _, found := tags["_f"]; !found {
 		tags["_f"] = "i"
 	}
-	serializedTags := serializeTags(tags)
-	return s.NewCounter(fmt.Sprintf("%s%s", name, serializedTags))
+
+	return s.NewCounterWithTags(name, tags)
 }
 
 func (s *statStore) NewGauge(name string) Gauge {
+	return s.NewGaugeWithTags(name, nil)
+}
+
+func (s *statStore) NewGaugeWithTags(name string, tags map[string]string) Gauge {
+	serializedTags := serializeTags(tags)
+	name = fmt.Sprintf("%s%s", name, serializedTags)
+
 	s.gaugesMtx.RLock()
 	g, ok := s.gauges[name]
 	s.gaugesMtx.RUnlock()
@@ -438,12 +455,6 @@ func (s *statStore) NewGauge(name string) Gauge {
 	}
 
 	return g
-
-}
-
-func (s *statStore) NewGaugeWithTags(name string, tags map[string]string) Gauge {
-	serializedTags := serializeTags(tags)
-	return s.NewGauge(fmt.Sprintf("%s%s", name, serializedTags))
 }
 
 func (s *statStore) NewPerInstanceGauge(name string, tags map[string]string) Gauge {
@@ -454,11 +465,18 @@ func (s *statStore) NewPerInstanceGauge(name string, tags map[string]string) Gau
 	if _, found := tags["_f"]; !found {
 		tags["_f"] = "i"
 	}
-	serializedTags := serializeTags(tags)
-	return s.NewGauge(fmt.Sprintf("%s%s", name, serializedTags))
+
+	return s.NewGaugeWithTags(name, tags)
 }
 
 func (s *statStore) NewTimer(name string) Timer {
+	return s.NewTimerWithTags(name, nil)
+}
+
+func (s *statStore) NewTimerWithTags(name string, tags map[string]string) Timer {
+	serializedTags := serializeTags(tags)
+	name = fmt.Sprintf("%s%s", name, serializedTags)
+
 	s.timersMtx.RLock()
 	t, ok := s.timers[name]
 	s.timersMtx.RUnlock()
@@ -474,12 +492,6 @@ func (s *statStore) NewTimer(name string) Timer {
 	s.timersMtx.Unlock()
 
 	return t
-
-}
-
-func (s *statStore) NewTimerWithTags(name string, tags map[string]string) Timer {
-	serializedTags := serializeTags(tags)
-	return s.NewTimer(fmt.Sprintf("%s%s", name, serializedTags))
 }
 
 func (s *statStore) NewPerInstanceTimer(name string, tags map[string]string) Timer {
@@ -490,12 +502,16 @@ func (s *statStore) NewPerInstanceTimer(name string, tags map[string]string) Tim
 	if _, found := tags["_f"]; !found {
 		tags["_f"] = "i"
 	}
-	serializedTags := serializeTags(tags)
-	return s.NewTimer(fmt.Sprintf("%s%s", name, serializedTags))
+
+	return s.NewTimerWithTags(name, tags)
 }
 
 func (s subScope) Scope(name string) Scope {
 	return &subScope{registry: s.registry, name: fmt.Sprintf("%s.%s", s.name, name)}
+}
+
+func (s subScope) ScopeWithTags(name string, tags map[string]string) Scope {
+	return &subScope{registry: s.registry, name: fmt.Sprintf("%s.%s", s.name, name), tags: s.mergeTags(tags)}
 }
 
 func (s subScope) Store() Store {
@@ -503,37 +519,54 @@ func (s subScope) Store() Store {
 }
 
 func (s subScope) NewCounter(name string) Counter {
-	return s.registry.NewCounter(fmt.Sprintf("%s.%s", s.name, name))
+	return s.NewCounterWithTags(name, nil)
 }
 
 func (s subScope) NewCounterWithTags(name string, tags map[string]string) Counter {
-	return s.registry.NewCounterWithTags(fmt.Sprintf("%s.%s", s.name, name), tags)
+	return s.registry.NewCounterWithTags(fmt.Sprintf("%s.%s", s.name, name), s.mergeTags(tags))
 }
 
 func (s subScope) NewPerInstanceCounter(name string, tags map[string]string) Counter {
-	return s.registry.NewPerInstanceCounter(fmt.Sprintf("%s.%s", s.name, name), tags)
+	return s.registry.NewPerInstanceCounter(fmt.Sprintf("%s.%s", s.name, name), s.mergeTags(tags))
 }
 
 func (s subScope) NewGauge(name string) Gauge {
-	return s.registry.NewGauge(fmt.Sprintf("%s.%s", s.name, name))
+	return s.NewGaugeWithTags(name, nil)
 }
 
 func (s subScope) NewGaugeWithTags(name string, tags map[string]string) Gauge {
-	return s.registry.NewGaugeWithTags(fmt.Sprintf("%s.%s", s.name, name), tags)
+	return s.registry.NewGaugeWithTags(fmt.Sprintf("%s.%s", s.name, name), s.mergeTags(tags))
 }
 
 func (s subScope) NewPerInstanceGauge(name string, tags map[string]string) Gauge {
-	return s.registry.NewPerInstanceGauge(fmt.Sprintf("%s.%s", s.name, name), tags)
+	return s.registry.NewPerInstanceGauge(fmt.Sprintf("%s.%s", s.name, name), s.mergeTags(tags))
 }
 
 func (s subScope) NewTimer(name string) Timer {
-	return s.registry.NewTimer(fmt.Sprintf("%s.%s", s.name, name))
+	return s.NewTimerWithTags(name, nil)
 }
 
 func (s subScope) NewTimerWithTags(name string, tags map[string]string) Timer {
-	return s.registry.NewTimerWithTags(fmt.Sprintf("%s.%s", s.name, name), tags)
+	return s.registry.NewTimerWithTags(fmt.Sprintf("%s.%s", s.name, name), s.mergeTags(tags))
 }
 
 func (s subScope) NewPerInstanceTimer(name string, tags map[string]string) Timer {
-	return s.registry.NewPerInstanceTimer(fmt.Sprintf("%s.%s", s.name, name), tags)
+	return s.registry.NewPerInstanceTimer(fmt.Sprintf("%s.%s", s.name, name), s.mergeTags(tags))
+}
+
+// mergeTags augments tags with all scope-level tags that are not already present.
+// Modifies and returns tags directly.
+func (s subScope) mergeTags(tags map[string]string) map[string]string {
+	if len(s.tags) == 0 {
+		return tags
+	}
+	if tags == nil {
+		tags = make(map[string]string)
+	}
+	for k, v := range s.tags {
+		if _, ok := tags[k]; !ok {
+			tags[k] = v
+		}
+	}
+	return tags
 }

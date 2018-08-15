@@ -28,6 +28,9 @@ func (t tagSet) Swap(i, j int)      { t[i], t[j] = t[j], t[i] }
 func (t tagSet) Less(i, j int) bool { return t[i].dimension < t[j].dimension }
 
 func serializeTags(tags map[string]string) string {
+	if len(tags) == 0 {
+		return ""
+	}
 	tagPairs := make([]tagPair, 0, len(tags))
 	for tagKey, tagValue := range tags {
 		tagValue = illegalTagValueChars.ReplaceAllLiteralString(tagValue, tagFailsafe)
