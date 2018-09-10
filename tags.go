@@ -14,7 +14,7 @@ const (
 )
 
 // illegalTagValueChars are loosely set to ensure we don't have statsd parse errors.
-var illegalTagValueChars = regexp.MustCompile(`[:|]`)
+var illegalTagValueChars = regexp.MustCompile(`[:|.]`)
 
 type tagPair struct {
 	dimension string

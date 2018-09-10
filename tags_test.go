@@ -27,3 +27,11 @@ func TestSerializeIllegalTags(t *testing.T) {
 		t.Errorf("Serialized output (%s) didn't match expected output", serialized)
 	}
 }
+
+func TestSerializeTagValuePeriod(t *testing.T) {
+	tags := map[string]string{"foo": "blah.blah", "q": "p"}
+	serialized := serializeTags(tags)
+	if serialized != ".__foo=blah_blah.__q=p" {
+		t.Errorf("Serialized output (%s) didn't match expected output", serialized)
+	}
+}
