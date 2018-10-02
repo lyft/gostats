@@ -293,15 +293,16 @@ func TestScopesWithTags(t *testing.T) {
 
 	ascope := store.ScopeWithTags("a", map[string]string{"x": "a", "y": "a"})
 	bscope := ascope.ScopeWithTags("b", map[string]string{"x": "b", "z": "b"})
-	counter := bscope.NewCounter("c")
+	dscope := bscope.Scope("d")
+	counter := dscope.NewCounter("c")
 	counter.Inc()
-	timer := bscope.NewTimer("t")
+	timer := dscope.NewTimer("t")
 	timer.AddValue(1)
-	gauge := bscope.NewGauge("g")
+	gauge := dscope.NewGauge("g")
 	gauge.Set(1)
 	store.Flush()
 
-	expected := "a.b.t.__x=b.__y=a.__z=b:1.000000|ms\na.b.c.__x=b.__y=a.__z=b:1|c\na.b.g.__x=b.__y=a.__z=b:1|g\n"
+	expected := "a.b.d.t.__x=b.__y=a.__z=b:1.000000|ms\na.b.d.c.__x=b.__y=a.__z=b:1|c\na.b.d.g.__x=b.__y=a.__z=b:1|g\n"
 	if expected != sink.record {
 		t.Errorf("Expected: '%s' Got: '%s'", expected, sink.record)
 	}
@@ -321,7 +322,7 @@ func TestScopesAndMetricsWithTags(t *testing.T) {
 	gauge.Set(1)
 	store.Flush()
 
-	expected := "a.b.t.__x=m.__z=m:1.000000|ms\na.b.c.__x=m.__z=m:1|c\na.b.g.__x=m.__z=m:1|g\n"
+	expected := "a.b.t.__x=m.__y=a.__z=m:1.000000|ms\na.b.c.__x=m.__y=a.__z=m:1|c\na.b.g.__x=m.__y=a.__z=m:1|g\n"
 	if expected != sink.record {
 		t.Errorf("Expected: '%s' Got: '%s'", expected, sink.record)
 	}

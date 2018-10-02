@@ -507,7 +507,7 @@ func (s *statStore) NewPerInstanceTimer(name string, tags map[string]string) Tim
 }
 
 func (s subScope) Scope(name string) Scope {
-	return &subScope{registry: s.registry, name: fmt.Sprintf("%s.%s", s.name, name)}
+	return s.ScopeWithTags(name, nil)
 }
 
 func (s subScope) ScopeWithTags(name string, tags map[string]string) Scope {
