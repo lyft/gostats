@@ -11,6 +11,8 @@ type Settings struct {
 	StatsdHost string `envconfig:"STATSD_HOST" default:"localhost"`
 	// Port where statsd is listening at.
 	StatsdPort int `envconfig:"STATSD_PORT" default:"8125"`
+	// Port where statsd is listening at.
+	StatsdProtocol string `envconfig:"STATSD_PROTOCOL" default:"tcp"`
 	// Flushing interval.
 	FlushIntervalS int `envconfig:"GOSTATS_FLUSH_INTERVAL_SECONDS" default:"5"`
 }

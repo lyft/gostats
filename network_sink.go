@@ -14,7 +14,7 @@ import (
 // TODO(btc): add constructor that accepts functional options in order to allow
 // users to choose the constants that work best for them. (Leave the existing
 // c'tor for backwards compatibility)
-// e.g. `func NewTCPStatsdSinkWithOptions(opts ...Option) Sink`
+// e.g. `func NewNetworkStatsdSinkWithOptions(opts ...Option) Sink`
 
 const (
 	flushInterval           = time.Second
@@ -24,9 +24,9 @@ const (
 	chanSize                = approxMaxMemBytes / defaultBufferSize
 )
 
-// NewTCPStatsdSink returns a FlushableSink that is backed by a buffered writer
+// NewNetworkStatsdSink returns a FlushableSink that is backed by a buffered writer
 // and a separate goroutine that flushes those buffers to a statsd connection.
-func NewTCPStatsdSink() FlushableSink {
+func NewNetworkStatsdSink() FlushableSink {
 	outc := make(chan *bytes.Buffer, chanSize) // TODO(btc): parameterize
 	writer := sinkWriter{
 		outc: outc,
@@ -35,7 +35,7 @@ func NewTCPStatsdSink() FlushableSink {
 	pool := newBufferPool(defaultBufferSize)
 	mu := &sync.Mutex{}
 	flushCond := sync.NewCond(mu)
-	s := &tcpStatsdSink{
+	s := &networkStatsdSink{
 		outc:      outc,
 		bufWriter: bufWriter,
 		pool:      pool,
@@ -47,7 +47,7 @@ func NewTCPStatsdSink() FlushableSink {
 	return s
 }
 
-type tcpStatsdSink struct {
+type networkStatsdSink struct {
 	conn net.Conn
 	outc chan *bytes.Buffer
 	pool *bufferpool
@@ -76,7 +76,7 @@ func (w *sinkWriter) Write(p []byte) (int, error) {
 	}
 }
 
-func (s *tcpStatsdSink) Flush() {
+func (s *networkStatsdSink) Flush() {
 	now := time.Now()
 	if err := s.flush(); err != nil {
 		// Not much we can do here; we don't know how/why we failed.
@@ -89,7 +89,7 @@ func (s *tcpStatsdSink) Flush() {
 	s.mu.Unlock()
 }
 
-func (s *tcpStatsdSink) flush() error {
+func (s *networkStatsdSink) flush() error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	err := s.bufWriter.Flush()
@@ -100,7 +100,7 @@ func (s *tcpStatsdSink) flush() error {
 	return nil
 }
 
-func (s *tcpStatsdSink) flushString(f string, args ...interface{}) {
+func (s *networkStatsdSink) flushString(f string, args ...interface{}) {
 	s.mu.Lock()
 	_, err := fmt.Fprintf(s.bufWriter, f, args...)
 	if err != nil {
@@ -110,7 +110,7 @@ func (s *tcpStatsdSink) flushString(f string, args ...interface{}) {
 }
 
 // s.mu should be held
-func (s *tcpStatsdSink) handleFlushError(err error, droppedBytes int) {
+func (s *networkStatsdSink) handleFlushError(err error, droppedBytes int) {
 	d := uint64(droppedBytes)
 	if (s.droppedBytes+d)%logOnEveryNDroppedBytes > s.droppedBytes%logOnEveryNDroppedBytes {
 		logger.WithField("total_dropped_bytes", s.droppedBytes+d).
@@ -125,25 +125,25 @@ func (s *tcpStatsdSink) handleFlushError(err error, droppedBytes int) {
 	})
 }
 
-func (s *tcpStatsdSink) FlushCounter(name string, value uint64) {
+func (s *networkStatsdSink) FlushCounter(name string, value uint64) {
 	s.flushString("%s:%d|c\n", name, value)
 }
 
-func (s *tcpStatsdSink) FlushGauge(name string, value uint64) {
+func (s *networkStatsdSink) FlushGauge(name string, value uint64) {
 	s.flushString("%s:%d|g\n", name, value)
 }
 
-func (s *tcpStatsdSink) FlushTimer(name string, value float64) {
+func (s *networkStatsdSink) FlushTimer(name string, value float64) {
 	s.flushString("%s:%f|ms\n", name, value)
 }
 
-func (s *tcpStatsdSink) run() {
+func (s *networkStatsdSink) run() {
 	settings := GetSettings()
 	t := time.NewTicker(flushInterval)
 	defer t.Stop()
 	for {
 		if s.conn == nil {
-			conn, err := net.Dial("tcp", fmt.Sprintf("%s:%d", settings.StatsdHost,
+			conn, err := net.Dial(settings.StatsdProtocol, fmt.Sprintf("%s:%d", settings.StatsdHost,
 				settings.StatsdPort))
 			if err != nil {
 				logger.Warnf("statsd connection error: %s", err)

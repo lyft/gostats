@@ -198,7 +198,7 @@ func NewDefaultStore() Store {
 		newStore = NewStore(NewLoggingSink(), false)
 		go newStore.Start(time.NewTicker(10 * time.Second))
 	} else {
-		newStore = NewStore(NewTCPStatsdSink(), true)
+		newStore = NewStore(NewNetworkStatsdSink(), true)
 		go newStore.Start(time.NewTicker(time.Duration(settings.FlushIntervalS) * time.Second))
 	}
 	return newStore
