@@ -31,18 +31,11 @@ func NewTCPStatsdSink() FlushableSink {
 	writer := sinkWriter{
 		outc: outc,
 	}
-	bufWriter := bufio.NewWriterSize(&writer, defaultBufferSize) // TODO(btc): parameterize size
-	pool := newBufferPool(defaultBufferSize)
-	mu := &sync.Mutex{}
-	flushCond := sync.NewCond(mu)
 	s := &tcpStatsdSink{
 		outc:      outc,
-		bufWriter: bufWriter,
-		pool:      pool,
-		mu:        mu,
-		flushCond: flushCond,
+		bufWriter: bufio.NewWriterSize(&writer, defaultBufferSize), // TODO(btc): parameterize size
 	}
-	writer.pool = s.pool
+	s.flushCond = sync.NewCond(&s.mu)
 	go s.run()
 	return s
 }
@@ -50,9 +43,8 @@ func NewTCPStatsdSink() FlushableSink {
 type tcpStatsdSink struct {
 	conn net.Conn
 	outc chan *bytes.Buffer
-	pool *bufferpool
 
-	mu            *sync.Mutex
+	mu            sync.Mutex
 	droppedBytes  uint64
 	bufWriter     *bufio.Writer
 	flushCond     *sync.Cond
@@ -60,13 +52,12 @@ type tcpStatsdSink struct {
 }
 
 type sinkWriter struct {
-	pool *bufferpool
 	outc chan<- *bytes.Buffer
 }
 
 func (w *sinkWriter) Write(p []byte) (int, error) {
 	n := len(p)
-	dest := w.pool.Get()
+	dest := getBuffer()
 	dest.Write(p)
 	select {
 	case w.outc <- dest:
@@ -120,7 +111,6 @@ func (s *tcpStatsdSink) handleFlushError(err error, droppedBytes int) {
 	s.droppedBytes += d
 
 	s.bufWriter.Reset(&sinkWriter{
-		pool: s.pool,
 		outc: s.outc,
 	})
 }
@@ -163,8 +153,7 @@ func (s *tcpStatsdSink) run() {
 				return
 			}
 			lenbuf := len(buf.Bytes())
-			n, err := s.conn.Write(buf.Bytes())
-
+			_, err := buf.WriteTo(s.conn)
 			if len(s.outc) == 0 {
 				// We've at least tried to write all the data we have. Wake up anyone waiting on flush.
 				s.mu.Lock()
@@ -172,40 +161,29 @@ func (s *tcpStatsdSink) run() {
 				s.mu.Unlock()
 				s.flushCond.Broadcast()
 			}
-
-			if err != nil || n < lenbuf {
+			if err != nil {
 				s.mu.Lock()
-				if err != nil {
-					s.handleFlushError(err, lenbuf)
-				} else {
-					s.handleFlushError(fmt.Errorf("short write to statsd, resetting connection"), lenbuf-n)
-				}
+				s.handleFlushError(err, lenbuf)
 				s.mu.Unlock()
 				_ = s.conn.Close() // Ignore close failures
 				s.conn = nil
 			}
-			s.pool.Put(buf)
+			putBuffer(buf)
 		}
 	}
 }
 
-type bufferpool struct {
-	pool sync.Pool
-}
+var bufferPool sync.Pool
 
-func newBufferPool(defaultSizeBytes int) *bufferpool {
-	p := new(bufferpool)
-	p.pool.New = func() interface{} {
-		return bytes.NewBuffer(make([]byte, 0, defaultSizeBytes))
+func getBuffer() *bytes.Buffer {
+	if v := bufferPool.Get(); v != nil {
+		b := v.(*bytes.Buffer)
+		b.Reset()
+		return b
 	}
-	return p
+	return new(bytes.Buffer)
 }
 
-func (p *bufferpool) Put(b *bytes.Buffer) {
-	b.Reset()
-	p.pool.Put(b)
-}
-
-func (p *bufferpool) Get() *bytes.Buffer {
-	return p.pool.Get().(*bytes.Buffer)
+func putBuffer(b *bytes.Buffer) {
+	bufferPool.Put(b)
 }
