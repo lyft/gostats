@@ -68,3 +68,21 @@ func BenchmarkStore_MutexContention(b *testing.B) {
 		bmVal = c.Value()
 	}
 }
+
+func BenchmarkStore_NewCounterWithTags(b *testing.B) {
+	s := NewStore(&nullSink{}, false)
+	t := time.NewTicker(1 * time.Second) // we want flush to contend with accessing metrics
+	defer t.Stop()
+	go s.Start(t)
+	tags := map[string]string{
+		"tag1": "val1",
+		"tag2": "val2",
+		"tag3": "val3",
+		"tag4": "val4",
+		"tag5": "val5",
+	}
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		s.NewCounterWithTags("counter_name", tags)
+	}
+}
