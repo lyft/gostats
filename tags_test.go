@@ -35,3 +35,17 @@ func TestSerializeTagValuePeriod(t *testing.T) {
 		t.Errorf("Serialized output (%s) didn't match expected output", serialized)
 	}
 }
+
+func BenchmarkSerializeTags(b *testing.B) {
+	tags := map[string]string{
+		"tag1": "val1",
+		"tag2": "val2",
+		"tag3": "val3",
+		"tag4": "val4",
+		"tag5": "val5",
+	}
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		serializeTags(tags)
+	}
+}
