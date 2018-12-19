@@ -3,6 +3,7 @@ package stats
 import (
 	"sort"
 	"strings"
+	"unsafe"
 )
 
 // illegalTagValueChars are loosely set to ensure we don't have statsd parse errors.
@@ -41,13 +42,13 @@ func serializeTags(tags map[string]string) string {
 	}
 	sort.Sort(tagSet(pairs))
 
-	var w strings.Builder
-	w.Grow(n)
+	// CEV: this is same as strings.Builder, but works with go1.9 and earlier
+	b := make([]byte, 0, n)
 	for _, tag := range pairs {
-		w.WriteString(prefix)
-		w.WriteString(tag.dimension)
-		w.WriteString(sep)
-		w.WriteString(tag.value)
+		b = append(b, prefix...)
+		b = append(b, tag.dimension...)
+		b = append(b, sep...)
+		b = append(b, tag.value...)
 	}
-	return w.String()
+	return *(*string)(unsafe.Pointer(&b))
 }
