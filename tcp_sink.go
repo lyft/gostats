@@ -82,13 +82,12 @@ func (s *tcpStatsdSink) Flush() {
 
 func (s *tcpStatsdSink) flush() error {
 	s.mu.Lock()
-	defer s.mu.Unlock()
 	err := s.bufWriter.Flush()
+	s.mu.Unlock()
 	if err != nil {
 		s.handleFlushError(err, s.bufWriter.Buffered())
-		return err
 	}
-	return nil
+	return err
 }
 
 func (s *tcpStatsdSink) flushString(f string, args ...interface{}) {
