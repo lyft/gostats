@@ -35,7 +35,7 @@ func NewTCPStatsdSink() FlushableSink {
 		outc:      outc,
 		bufWriter: bufio.NewWriterSize(&writer, defaultBufferSize), // TODO(btc): parameterize size
 	}
-	s.flushCond = sync.NewCond(&s.mu)
+	s.flushCond.L = &s.mu
 	go s.run()
 	return s
 }
@@ -47,7 +47,7 @@ type tcpStatsdSink struct {
 	mu            sync.Mutex
 	droppedBytes  uint64
 	bufWriter     *bufio.Writer
-	flushCond     *sync.Cond
+	flushCond     sync.Cond
 	lastFlushTime time.Time
 }
 
