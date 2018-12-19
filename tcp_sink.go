@@ -148,17 +148,11 @@ func (s *tcpStatsdSink) run() {
 		if s.conn == nil && !s.initConn(&settings) {
 			continue
 		}
-
 		select {
 		case <-t.C:
 			s.flush()
-		case buf, ok := <-s.outc: // Receive from the channel and check if the channel has been closed
-			if !ok {
-				logger.Warnf("Closing statsd client")
-				s.conn.Close()
-				return
-			}
-			lenbuf := len(buf.Bytes())
+		case buf := <-s.outc: // Receive from the channel and check if the channel has been closed
+			lenbuf := buf.Len()
 			_, err := buf.WriteTo(s.conn)
 			if len(s.outc) == 0 {
 				// We've at least tried to write all the data we have. Wake up anyone waiting on flush.
