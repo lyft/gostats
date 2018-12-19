@@ -126,20 +126,27 @@ func (s *tcpStatsdSink) FlushTimer(name string, value float64) {
 	s.flushString("%s:%f|ms\n", name, value)
 }
 
+func (s *tcpStatsdSink) initConn(settings *Settings) bool {
+	if s.conn == nil {
+		conn, err := net.Dial("tcp", fmt.Sprintf("%s:%d", settings.StatsdHost,
+			settings.StatsdPort))
+		if err != nil {
+			logger.Warnf("statsd connection error: %s", err)
+			time.Sleep(3 * time.Second)
+			return false
+		}
+		s.conn = conn
+	}
+	return true
+}
+
 func (s *tcpStatsdSink) run() {
 	settings := GetSettings()
 	t := time.NewTicker(flushInterval)
 	defer t.Stop()
 	for {
-		if s.conn == nil {
-			conn, err := net.Dial("tcp", fmt.Sprintf("%s:%d", settings.StatsdHost,
-				settings.StatsdPort))
-			if err != nil {
-				logger.Warnf("statsd connection error: %s", err)
-				time.Sleep(3 * time.Second)
-				continue
-			}
-			s.conn = conn
+		if s.conn == nil && !s.initConn(&settings) {
+			continue
 		}
 
 		select {
