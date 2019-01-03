@@ -446,11 +446,11 @@ func (s *statStore) NewGaugeWithTags(name string, tags map[string]string) Gauge 
 
 	s.gaugesMtx.Lock()
 	s.gauges[name] = g
-	s.gaugesMtx.Unlock()
 
 	if s.export && expvar.Get(name) == nil {
 		expvar.Publish(name, g)
 	}
+	s.gaugesMtx.Unlock()
 
 	return g
 }
