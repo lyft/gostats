@@ -388,7 +388,7 @@ func (s *statStore) NewCounter(name string) Counter {
 }
 
 func (s *statStore) NewCounterWithTags(name string, tags map[string]string) Counter {
-	name += serializeTags(tags)
+	name = serializeTags(name, tags)
 
 	s.countersMtx.RLock()
 	c, ok := s.counters[name]
@@ -432,7 +432,7 @@ func (s *statStore) NewGauge(name string) Gauge {
 }
 
 func (s *statStore) NewGaugeWithTags(name string, tags map[string]string) Gauge {
-	name += serializeTags(tags)
+	name = serializeTags(name, tags)
 
 	s.gaugesMtx.RLock()
 	g, ok := s.gauges[name]
@@ -472,7 +472,7 @@ func (s *statStore) NewTimer(name string) Timer {
 }
 
 func (s *statStore) NewTimerWithTags(name string, tags map[string]string) Timer {
-	name += serializeTags(tags)
+	name = serializeTags(name, tags)
 
 	s.timersMtx.RLock()
 	t, ok := s.timers[name]
