@@ -72,7 +72,7 @@ func BenchmarkStore_MutexContention(b *testing.B) {
 
 func BenchmarkStore_NewCounterWithTags(b *testing.B) {
 	s := NewStore(nullSink{}, false)
-	t := time.NewTicker(1 * time.Second) // we want flush to contend with accessing metrics
+	t := time.NewTicker(time.Hour) // don't flush
 	defer t.Stop()
 	go s.Start(t)
 	tags := map[string]string{
