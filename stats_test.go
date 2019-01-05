@@ -56,7 +56,7 @@ var bmID = ""
 var bmVal = uint64(0)
 
 func BenchmarkStore_MutexContention(b *testing.B) {
-	s := NewStore(&nullSink{}, false)
+	s := NewStore(nullSink{}, false)
 	t := time.NewTicker(500 * time.Microsecond) // we want flush to contend with accessing metrics
 	defer t.Stop()
 	go s.Start(t)
@@ -71,7 +71,7 @@ func BenchmarkStore_MutexContention(b *testing.B) {
 }
 
 func BenchmarkStore_NewCounterWithTags(b *testing.B) {
-	s := NewStore(&nullSink{}, false)
+	s := NewStore(nullSink{}, false)
 	t := time.NewTicker(1 * time.Second) // we want flush to contend with accessing metrics
 	defer t.Stop()
 	go s.Start(t)
