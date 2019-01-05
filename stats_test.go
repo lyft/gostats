@@ -52,9 +52,6 @@ func TestTimer(t *testing.T) {
 	}
 }
 
-var bmID = ""
-var bmVal = uint64(0)
-
 func BenchmarkStore_MutexContention(b *testing.B) {
 	s := NewStore(nullSink{}, false)
 	t := time.NewTicker(500 * time.Microsecond) // we want flush to contend with accessing metrics
@@ -63,10 +60,10 @@ func BenchmarkStore_MutexContention(b *testing.B) {
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		bmID = strconv.Itoa(rand.Intn(1000))
+		bmID := strconv.Itoa(rand.Intn(1000))
 		c := s.NewCounter(bmID)
 		c.Inc()
-		bmVal = c.Value()
+		_ = c.Value()
 	}
 }
 
