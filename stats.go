@@ -2,7 +2,6 @@ package stats
 
 import (
 	"expvar"
-	"fmt"
 	"strconv"
 	"sync"
 	"sync/atomic"
@@ -204,12 +203,6 @@ func NewDefaultStore() Store {
 	return newStore
 }
 
-type subScope struct {
-	registry *statStore
-	name     string
-	tags     map[string]string
-}
-
 type counter struct {
 	currentValue  uint64
 	lastSentValue uint64
@@ -388,7 +381,7 @@ func (s *statStore) NewCounter(name string) Counter {
 }
 
 func (s *statStore) NewCounterWithTags(name string, tags map[string]string) Counter {
-	name += serializeTags(tags)
+	name = serializeTags(name, tags)
 
 	s.countersMtx.RLock()
 	c, ok := s.counters[name]
@@ -432,7 +425,7 @@ func (s *statStore) NewGauge(name string) Gauge {
 }
 
 func (s *statStore) NewGaugeWithTags(name string, tags map[string]string) Gauge {
-	name += serializeTags(tags)
+	name = serializeTags(name, tags)
 
 	s.gaugesMtx.RLock()
 	g, ok := s.gauges[name]
@@ -472,7 +465,7 @@ func (s *statStore) NewTimer(name string) Timer {
 }
 
 func (s *statStore) NewTimerWithTags(name string, tags map[string]string) Timer {
-	name += serializeTags(tags)
+	name = serializeTags(name, tags)
 
 	s.timersMtx.RLock()
 	t, ok := s.timers[name]
@@ -503,12 +496,18 @@ func (s *statStore) NewPerInstanceTimer(name string, tags map[string]string) Tim
 	return s.NewTimerWithTags(name, tags)
 }
 
+type subScope struct {
+	registry *statStore
+	name     string
+	tags     map[string]string
+}
+
 func (s subScope) Scope(name string) Scope {
 	return s.ScopeWithTags(name, nil)
 }
 
 func (s subScope) ScopeWithTags(name string, tags map[string]string) Scope {
-	return &subScope{registry: s.registry, name: fmt.Sprintf("%s.%s", s.name, name), tags: s.mergeTags(tags)}
+	return &subScope{registry: s.registry, name: joinScopes(s.name, name), tags: s.mergeTags(tags)}
 }
 
 func (s subScope) Store() Store {
@@ -520,11 +519,11 @@ func (s subScope) NewCounter(name string) Counter {
 }
 
 func (s subScope) NewCounterWithTags(name string, tags map[string]string) Counter {
-	return s.registry.NewCounterWithTags(fmt.Sprintf("%s.%s", s.name, name), s.mergeTags(tags))
+	return s.registry.NewCounterWithTags(joinScopes(s.name, name), s.mergeTags(tags))
 }
 
 func (s subScope) NewPerInstanceCounter(name string, tags map[string]string) Counter {
-	return s.registry.NewPerInstanceCounter(fmt.Sprintf("%s.%s", s.name, name), s.mergeTags(tags))
+	return s.registry.NewPerInstanceCounter(joinScopes(s.name, name), s.mergeTags(tags))
 }
 
 func (s subScope) NewGauge(name string) Gauge {
@@ -532,11 +531,11 @@ func (s subScope) NewGauge(name string) Gauge {
 }
 
 func (s subScope) NewGaugeWithTags(name string, tags map[string]string) Gauge {
-	return s.registry.NewGaugeWithTags(fmt.Sprintf("%s.%s", s.name, name), s.mergeTags(tags))
+	return s.registry.NewGaugeWithTags(joinScopes(s.name, name), s.mergeTags(tags))
 }
 
 func (s subScope) NewPerInstanceGauge(name string, tags map[string]string) Gauge {
-	return s.registry.NewPerInstanceGauge(fmt.Sprintf("%s.%s", s.name, name), s.mergeTags(tags))
+	return s.registry.NewPerInstanceGauge(joinScopes(s.name, name), s.mergeTags(tags))
 }
 
 func (s subScope) NewTimer(name string) Timer {
@@ -544,11 +543,15 @@ func (s subScope) NewTimer(name string) Timer {
 }
 
 func (s subScope) NewTimerWithTags(name string, tags map[string]string) Timer {
-	return s.registry.NewTimerWithTags(fmt.Sprintf("%s.%s", s.name, name), s.mergeTags(tags))
+	return s.registry.NewTimerWithTags(joinScopes(s.name, name), s.mergeTags(tags))
 }
 
 func (s subScope) NewPerInstanceTimer(name string, tags map[string]string) Timer {
-	return s.registry.NewPerInstanceTimer(fmt.Sprintf("%s.%s", s.name, name), s.mergeTags(tags))
+	return s.registry.NewPerInstanceTimer(joinScopes(s.name, name), s.mergeTags(tags))
+}
+
+func joinScopes(parent, child string) string {
+	return parent + "." + child
 }
 
 // mergeTags augments tags with all scope-level tags that are not already present.
@@ -558,7 +561,7 @@ func (s subScope) mergeTags(tags map[string]string) map[string]string {
 		return tags
 	}
 	if tags == nil {
-		tags = make(map[string]string)
+		return s.tags
 	}
 	for k, v := range s.tags {
 		if _, ok := tags[k]; !ok {

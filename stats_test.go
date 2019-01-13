@@ -1,6 +1,7 @@
 package stats
 
 import (
+	"fmt"
 	"math/rand"
 	"strconv"
 	"strings"
@@ -51,27 +52,24 @@ func TestTimer(t *testing.T) {
 	}
 }
 
-var bmID = ""
-var bmVal = uint64(0)
-
 func BenchmarkStore_MutexContention(b *testing.B) {
-	s := NewStore(&nullSink{}, false)
+	s := NewStore(nullSink{}, false)
 	t := time.NewTicker(500 * time.Microsecond) // we want flush to contend with accessing metrics
 	defer t.Stop()
 	go s.Start(t)
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		bmID = strconv.Itoa(rand.Intn(1000))
+		bmID := strconv.Itoa(rand.Intn(1000))
 		c := s.NewCounter(bmID)
 		c.Inc()
-		bmVal = c.Value()
+		_ = c.Value()
 	}
 }
 
 func BenchmarkStore_NewCounterWithTags(b *testing.B) {
-	s := NewStore(&nullSink{}, false)
-	t := time.NewTicker(1 * time.Second) // we want flush to contend with accessing metrics
+	s := NewStore(nullSink{}, false)
+	t := time.NewTicker(time.Hour) // don't flush
 	defer t.Stop()
 	go s.Start(t)
 	tags := map[string]string{
@@ -84,5 +82,42 @@ func BenchmarkStore_NewCounterWithTags(b *testing.B) {
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		s.NewCounterWithTags("counter_name", tags)
+	}
+}
+
+func initBenchScope() (scope Scope, childTags map[string]string) {
+	s := NewStore(nullSink{}, false)
+
+	t := time.NewTicker(time.Hour) // don't flush
+	t.Stop()                       // never sends
+	go s.Start(t)
+
+	scopeTags := make(map[string]string, 5)
+	childTags = make(map[string]string, 5)
+
+	for i := 0; i < 5; i++ {
+		tag := fmt.Sprintf("%dtag", i)
+		val := fmt.Sprintf("%dval", i)
+		scopeTags[tag] = val
+		childTags["c"+tag] = "c" + val
+	}
+
+	scope = s.ScopeWithTags("scope", scopeTags)
+	return
+}
+
+func BenchmarkStore_ScopeWithTags(b *testing.B) {
+	scope, childTags := initBenchScope()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		scope.NewCounterWithTags("counter_name", childTags)
+	}
+}
+
+func BenchmarkStore_ScopeNoTags(b *testing.B) {
+	scope, _ := initBenchScope()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		scope.NewCounterWithTags("counter_name", nil)
 	}
 }
