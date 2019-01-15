@@ -239,7 +239,7 @@ type gauge struct {
 }
 
 func (c *gauge) String() string {
-	return strconv.FormatUint(c.value, 10)
+	return strconv.FormatUint(c.Value(), 10)
 }
 
 func (c *gauge) Add(value uint64) {
