@@ -3,6 +3,7 @@ package stats
 import (
 	"fmt"
 	"math/rand"
+	"runtime"
 	"strconv"
 	"strings"
 	"sync"
@@ -49,6 +50,99 @@ func TestTimer(t *testing.T) {
 	timer := sink.record
 	if !strings.Contains(timer, expected) {
 		t.Error("wanted timer value of test:9800.000000|ms, got", timer)
+	}
+}
+
+func testNewGaugeWithTags_ExpvarPublish(t *testing.T, N int) {
+	tags := map[string]string{
+		"tag1": "var1",
+		"tag2": "var2",
+		"tag3": "var3",
+		"tag4": "var4",
+	}
+
+	store := NewStore(nullSink{}, true)
+	wg := new(sync.WaitGroup)
+	start := new(sync.WaitGroup)
+	start.Add(1)
+
+	numCPU := runtime.NumCPU() * 4 // increase lock contention
+	for i := 0; i < numCPU; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			start.Wait()
+			for i := 0; i < N; i++ {
+				store.NewGaugeWithTags("gauge.foo.bar.baz."+strconv.Itoa(i), tags)
+			}
+		}()
+	}
+	start.Done()
+	wg.Wait()
+}
+
+// Test that concurrently creating new gauges does not call expvar.Publish()
+// with the same name twice.
+func TestNewGaugeWithTags_ExpvarPublish(t *testing.T) {
+	const N = 200
+	if testing.Short() {
+		t.Log("skipping full test in short mode")
+		testNewGaugeWithTags_ExpvarPublish(t, N)
+		return
+	}
+	// this test typically fails early so run multiple times
+	// instead of running once with a larger value for N
+	for i := 0; i < 10; i++ {
+		testNewGaugeWithTags_ExpvarPublish(t, N)
+	}
+}
+
+func testNewCounterWithTags_ExpvarPublish(t *testing.T, N int) {
+	tags := map[string]string{
+		"tag1": "var1",
+		"tag2": "var2",
+		"tag3": "var3",
+		"tag4": "var4",
+	}
+
+	store := NewStore(nullSink{}, true)
+	wg := new(sync.WaitGroup)
+	start := new(sync.WaitGroup)
+	start.Add(1)
+
+	numCPU := runtime.NumCPU() * 4 // increase lock contention
+	for i := 0; i < numCPU; i++ {
+		wg.Add(1)
+		go func() {
+			defer func() {
+				if e := recover(); e != nil {
+					t.Fatalf("Duplicate calls to expvar.Publish: %v", e)
+				}
+			}()
+			defer wg.Done()
+			start.Wait()
+			for i := 0; i < N; i++ {
+				store.NewCounterWithTags("counter.foo.bar.baz."+strconv.Itoa(i), tags)
+			}
+		}()
+	}
+	start.Done()
+	wg.Wait()
+}
+
+// Test that concurrently creating new gauges does not call expvar.Publish()
+// with the same name twice.
+func TestNewCounterWithTags_ExpvarPublish(t *testing.T) {
+	const N = 200
+	if testing.Short() {
+		t.Log("skipping full test in short mode")
+		testNewCounterWithTags_ExpvarPublish(t, N)
+		return
+	}
+	// this test typically fails early so run multiple times
+	// instead of running once with a larger value for N
+	for i := 0; i < 10; i++ {
+		testNewCounterWithTags_ExpvarPublish(t, N)
 	}
 }
 
