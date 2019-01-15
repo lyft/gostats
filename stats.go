@@ -392,18 +392,17 @@ func (s *statStore) NewCounterWithTags(name string, tags map[string]string) Coun
 	}
 
 	s.countersMtx.Lock()
-	c, ok = s.counters[name]
-	if ok {
+	if c, ok = s.counters[name]; ok {
 		s.countersMtx.Unlock()
 		return c
 	}
 
 	c = &counter{}
 	s.counters[name] = c
+	s.countersMtx.Unlock()
 	if s.export && expvar.Get(name) == nil {
 		expvar.Publish(name, c)
 	}
-	s.countersMtx.Unlock()
 
 	return c
 }
@@ -435,12 +434,15 @@ func (s *statStore) NewGaugeWithTags(name string, tags map[string]string) Gauge 
 		return g
 	}
 
-	g = &gauge{}
-
 	s.gaugesMtx.Lock()
+	if g, ok = s.gauges[name]; ok {
+		s.gaugesMtx.Unlock()
+		return g
+	}
+
+	g = &gauge{}
 	s.gauges[name] = g
 	s.gaugesMtx.Unlock()
-
 	if s.export && expvar.Get(name) == nil {
 		expvar.Publish(name, g)
 	}
