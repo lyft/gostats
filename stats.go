@@ -392,8 +392,7 @@ func (s *statStore) NewCounterWithTags(name string, tags map[string]string) Coun
 	}
 
 	s.countersMtx.Lock()
-	c, ok = s.counters[name]
-	if ok {
+	if c, ok = s.counters[name]; ok {
 		s.countersMtx.Unlock()
 		return c
 	}
@@ -436,7 +435,7 @@ func (s *statStore) NewGaugeWithTags(name string, tags map[string]string) Gauge 
 	}
 
 	s.gaugesMtx.Lock()
-	if g, ok := s.gauges[name]; ok {
+	if g, ok = s.gauges[name]; ok {
 		s.gaugesMtx.Unlock()
 		return g
 	}
