@@ -470,17 +470,17 @@ func (s *statStore) NewTimerWithTags(name string, tags map[string]string) Timer 
 	name = serializeTags(name, tags)
 
 	s.timersMtx.RLock()
-	t, ok := s.timers[name]
+	t := s.timers[name]
 	s.timersMtx.RUnlock()
-
-	if ok {
+	if t != nil {
 		return t
 	}
 
-	t = &timer{name: name, sink: s.sink}
-
 	s.timersMtx.Lock()
-	s.timers[name] = t
+	if t = s.timers[name]; t == nil {
+		t = &timer{name: name, sink: s.sink}
+		s.timers[name] = t
+	}
 	s.timersMtx.Unlock()
 
 	return t
