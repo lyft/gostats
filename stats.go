@@ -572,3 +572,13 @@ func (s subScope) mergeTags(tags map[string]string) map[string]string {
 	}
 	return tags
 }
+
+// seenExpVars prevents duplicate names from being published
+// to expvars since doing so triggers a panic.
+var seenExpVars sync.Map
+
+func publishExpVar(name string, v expvar.Var) {
+	if _, found := seenExpVars.LoadOrStore(name, struct{}{}); !found {
+		expvar.Publish(name, v)
+	}
+}
