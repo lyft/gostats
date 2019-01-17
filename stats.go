@@ -384,26 +384,24 @@ func (s *statStore) NewCounterWithTags(name string, tags map[string]string) Coun
 	name = serializeTags(name, tags)
 
 	s.countersMtx.RLock()
-	c, ok := s.counters[name]
+	c := s.counters[name]
 	s.countersMtx.RUnlock()
-
-	if ok {
+	if c != nil {
 		return c
 	}
 
 	s.countersMtx.Lock()
-	if c, ok = s.counters[name]; ok {
+	if c = s.counters[name]; c != nil {
 		s.countersMtx.Unlock()
 		return c
 	}
-
-	c = &counter{}
+	c = new(counter)
 	s.counters[name] = c
 	s.countersMtx.Unlock()
-	if s.export && expvar.Get(name) == nil {
-		expvar.Publish(name, c)
-	}
 
+	if s.export {
+		publishExpVar(name, c)
+	}
 	return c
 }
 
@@ -427,26 +425,24 @@ func (s *statStore) NewGaugeWithTags(name string, tags map[string]string) Gauge 
 	name = serializeTags(name, tags)
 
 	s.gaugesMtx.RLock()
-	g, ok := s.gauges[name]
+	g := s.gauges[name]
 	s.gaugesMtx.RUnlock()
-
-	if ok {
+	if g != nil {
 		return g
 	}
 
 	s.gaugesMtx.Lock()
-	if g, ok = s.gauges[name]; ok {
+	if g = s.gauges[name]; g != nil {
 		s.gaugesMtx.Unlock()
 		return g
 	}
-
-	g = &gauge{}
+	g = new(gauge)
 	s.gauges[name] = g
 	s.gaugesMtx.Unlock()
-	if s.export && expvar.Get(name) == nil {
-		expvar.Publish(name, g)
-	}
 
+	if s.export {
+		publishExpVar(name, g)
+	}
 	return g
 }
 
@@ -470,17 +466,17 @@ func (s *statStore) NewTimerWithTags(name string, tags map[string]string) Timer 
 	name = serializeTags(name, tags)
 
 	s.timersMtx.RLock()
-	t, ok := s.timers[name]
+	t := s.timers[name]
 	s.timersMtx.RUnlock()
-
-	if ok {
+	if t != nil {
 		return t
 	}
 
-	t = &timer{name: name, sink: s.sink}
-
 	s.timersMtx.Lock()
-	s.timers[name] = t
+	if t = s.timers[name]; t == nil {
+		t = &timer{name: name, sink: s.sink}
+		s.timers[name] = t
+	}
 	s.timersMtx.Unlock()
 
 	return t
@@ -571,4 +567,14 @@ func (s subScope) mergeTags(tags map[string]string) map[string]string {
 		}
 	}
 	return tags
+}
+
+// seenExpVars prevents duplicate names from being published
+// to expvars since doing so triggers a panic.
+var seenExpVars sync.Map
+
+func publishExpVar(name string, v expvar.Var) {
+	if _, found := seenExpVars.LoadOrStore(name, struct{}{}); !found {
+		expvar.Publish(name, v)
+	}
 }
