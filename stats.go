@@ -558,7 +558,7 @@ func (s subScope) mergeTags(tags map[string]string) map[string]string {
 	if len(s.tags) == 0 {
 		return tags
 	}
-	if tags == nil {
+	if len(tags) == 0 {
 		return s.tags
 	}
 	for k, v := range s.tags {
