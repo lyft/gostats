@@ -11,7 +11,7 @@ go get github.com/lyft/gostats
 ## Building & Testing
 
 ```sh
-make install
+make install 
 make test
 ```
 
