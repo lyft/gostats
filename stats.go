@@ -86,7 +86,7 @@ type Scope interface {
 	// NewPerInstanceGauge adds a Per instance Gauge with optional Tags to a store, or a scope.
 	NewPerInstanceGauge(name string, tags map[string]string) Gauge
 
-	// NewTimer adds a Timer to a store, or a scope.
+	// NewTimer adds a Timer to a store, or a scope. Timers measure time in microseconds
 	NewTimer(name string) Timer
 
 	// NewTimerWithTags adds a Timer with Tags to a store, or a scope with Tags.
@@ -144,7 +144,7 @@ type Timer interface {
 	// AddValue flushs the timer with the argument's value.
 	AddValue(float64)
 
-	// AllocateSpan allocates a Timespan.
+	// AllocateSpan allocates a Timespan. Timers measure time in microseconds
 	AllocateSpan() Timespan
 }
 
@@ -157,6 +157,8 @@ type Timer interface {
 //   CompleteWithDuration(time.Duration)
 // When either function is called the timespan is flushed.
 // When Complete is called the timespan is flushed.
+//
+// Timers measure time in microseconds
 //
 // A Timespan can be flushed at function
 // return by calling Complete with golang's defer statement.
