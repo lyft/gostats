@@ -24,4 +24,4 @@ import "github.com/lyft/gostats"
 ```
 
 ## Timers
-It is not obvious but due to a but all gostats timers output timespans in *microseconds*, not milliseconds as the stat string itself suggests.
+It is not obvious but all gostats timers output timespans in *microseconds*, not milliseconds as the stat string itself suggests.
