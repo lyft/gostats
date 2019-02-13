@@ -1,7 +1,10 @@
 package stats
 
 import (
+	crand "crypto/rand"
+	"encoding/hex"
 	"fmt"
+	"io"
 	"math/rand"
 	"strconv"
 	"strings"
@@ -120,4 +123,33 @@ func BenchmarkStore_ScopeNoTags(b *testing.B) {
 	for i := 0; i < b.N; i++ {
 		scope.NewCounterWithTags("counter_name", nil)
 	}
+}
+
+func randomKey(tb testing.TB) string {
+	b := make([]byte, 64)
+	if _, err := io.ReadFull(crand.Reader, b); err != nil {
+		tb.Fatal(err)
+	}
+	return hex.EncodeToString(b)
+}
+
+func BenchmarkParallelCounter(b *testing.B) {
+	const N = 1000
+	keys := make([]string, N)
+	for i := 0; i < len(keys); i++ {
+		keys[i] = randomKey(b)
+	}
+
+	s := NewStore(nullSink{}, false)
+	t := time.NewTicker(time.Hour) // don't flush
+	defer t.Stop()                 // never sends
+	go s.Start(t)
+
+	b.ResetTimer()
+	b.RunParallel(func(pb *testing.PB) {
+		n := 0
+		for pb.Next() {
+			s.NewCounter(keys[n%N]).Inc()
+		}
+	})
 }
