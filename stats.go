@@ -379,9 +379,11 @@ func (s *statStore) NewCounterWithTags(name string, tags map[string]string) Coun
 	return c
 }
 
+var emptyPerInstanceTags = map[string]string{"_f": "i"}
+
 func (s *statStore) NewPerInstanceCounter(name string, tags map[string]string) Counter {
-	if tags == nil {
-		tags = make(map[string]string, 1)
+	if len(tags) == 0 {
+		return s.NewCounterWithTags(name, emptyPerInstanceTags)
 	}
 
 	if _, found := tags["_f"]; !found {
@@ -410,8 +412,8 @@ func (s *statStore) NewGaugeWithTags(name string, tags map[string]string) Gauge 
 }
 
 func (s *statStore) NewPerInstanceGauge(name string, tags map[string]string) Gauge {
-	if tags == nil {
-		tags = make(map[string]string, 1)
+	if len(tags) == 0 {
+		return s.NewGaugeWithTags(name, emptyPerInstanceTags)
 	}
 
 	if _, found := tags["_f"]; !found {
@@ -438,8 +440,8 @@ func (s *statStore) NewTimerWithTags(name string, tags map[string]string) Timer 
 }
 
 func (s *statStore) NewPerInstanceTimer(name string, tags map[string]string) Timer {
-	if tags == nil {
-		tags = make(map[string]string, 1)
+	if len(tags) == 0 {
+		return s.NewTimerWithTags(name, emptyPerInstanceTags)
 	}
 
 	if _, found := tags["_f"]; !found {
