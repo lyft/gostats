@@ -180,11 +180,8 @@ type StatGenerator interface {
 // NewStore returns an Empty store that flushes to Sink passed as an argument.
 func NewStore(sink Sink, export bool) Store {
 	return &statStore{
-		counters: make(map[string]*counter),
-		gauges:   make(map[string]*gauge),
-		timers:   make(map[string]*timer),
-		sink:     sink,
-		export:   export,
+		sink:   sink,
+		export: export,
 	}
 }
 
@@ -299,14 +296,9 @@ func (ts *timespan) CompleteWithDuration(value time.Duration) {
 }
 
 type statStore struct {
-	countersMtx sync.RWMutex
-	counters    map[string]*counter
-
-	gaugesMtx sync.RWMutex
-	gauges    map[string]*gauge
-
-	timersMtx sync.RWMutex
-	timers    map[string]*timer
+	counters sync.Map
+	gauges   sync.Map
+	timers   sync.Map
 
 	genMtx         sync.RWMutex
 	statGenerators []StatGenerator
@@ -322,25 +314,18 @@ func (s *statStore) Flush() {
 	}
 	s.genMtx.RUnlock()
 
-	s.countersMtx.RLock()
-	for name, cv := range s.counters {
-		value := cv.latch()
-
+	s.counters.Range(func(key, v interface{}) bool {
 		// Skip counters not incremented
-		if value == 0 {
-			continue
+		if value := v.(*counter).latch(); value != 0 {
+			s.sink.FlushCounter(key.(string), value)
 		}
+		return true
+	})
 
-		s.sink.FlushCounter(name, value)
-	}
-	s.countersMtx.RUnlock()
-
-	s.gaugesMtx.RLock()
-	for name, gv := range s.gauges {
-		value := gv.Value()
-		s.sink.FlushGauge(name, value)
-	}
-	s.gaugesMtx.RUnlock()
+	s.gauges.Range(func(key, v interface{}) bool {
+		s.sink.FlushGauge(key.(string), v.(*gauge).Value())
+		return true
+	})
 
 	flushableSink, ok := s.sink.(FlushableSink)
 	if ok {
@@ -382,24 +367,13 @@ func (s *statStore) NewCounter(name string) Counter {
 
 func (s *statStore) NewCounterWithTags(name string, tags map[string]string) Counter {
 	name = serializeTags(name, tags)
-
-	s.countersMtx.RLock()
-	c := s.counters[name]
-	s.countersMtx.RUnlock()
-	if c != nil {
-		return c
+	if v, ok := s.counters.Load(name); ok {
+		return v.(*counter)
 	}
-
-	s.countersMtx.Lock()
-	if c = s.counters[name]; c != nil {
-		s.countersMtx.Unlock()
-		return c
-	}
-	c = new(counter)
-	s.counters[name] = c
-	s.countersMtx.Unlock()
-
-	if s.export {
+	c := new(counter)
+	if v, loaded := s.counters.LoadOrStore(name, c); loaded {
+		c = v.(*counter)
+	} else if s.export {
 		publishExpVar(name, c)
 	}
 	return c
@@ -423,24 +397,13 @@ func (s *statStore) NewGauge(name string) Gauge {
 
 func (s *statStore) NewGaugeWithTags(name string, tags map[string]string) Gauge {
 	name = serializeTags(name, tags)
-
-	s.gaugesMtx.RLock()
-	g := s.gauges[name]
-	s.gaugesMtx.RUnlock()
-	if g != nil {
-		return g
+	if v, ok := s.gauges.Load(name); ok {
+		return v.(*gauge)
 	}
-
-	s.gaugesMtx.Lock()
-	if g = s.gauges[name]; g != nil {
-		s.gaugesMtx.Unlock()
-		return g
-	}
-	g = new(gauge)
-	s.gauges[name] = g
-	s.gaugesMtx.Unlock()
-
-	if s.export {
+	g := new(gauge)
+	if v, loaded := s.gauges.LoadOrStore(name, g); loaded {
+		g = v.(*gauge)
+	} else if s.export {
 		publishExpVar(name, g)
 	}
 	return g
@@ -464,21 +427,13 @@ func (s *statStore) NewTimer(name string) Timer {
 
 func (s *statStore) NewTimerWithTags(name string, tags map[string]string) Timer {
 	name = serializeTags(name, tags)
-
-	s.timersMtx.RLock()
-	t := s.timers[name]
-	s.timersMtx.RUnlock()
-	if t != nil {
-		return t
+	if v, ok := s.timers.Load(name); ok {
+		return v.(*timer)
 	}
-
-	s.timersMtx.Lock()
-	if t = s.timers[name]; t == nil {
-		t = &timer{name: name, sink: s.sink}
-		s.timers[name] = t
+	t := &timer{name: name, sink: s.sink}
+	if v, loaded := s.timers.LoadOrStore(name, t); loaded {
+		t = v.(*timer)
 	}
-	s.timersMtx.Unlock()
-
 	return t
 }
 
