@@ -10,7 +10,8 @@ func TestSerializeTags(t *testing.T) {
 	tags := map[string]string{"zzz": "hello", "q": "r"}
 	serialized := serializeTags(name, tags)
 	if serialized != expected {
-		t.Errorf("Serialized output (%s) didn't match expected output", serialized)
+		t.Errorf("Serialized output (%s) didn't match expected output: %s",
+			serialized, expected)
 	}
 }
 
@@ -20,7 +21,8 @@ func TestSerializeWithPerInstanceFlag(t *testing.T) {
 	tags := map[string]string{"foo": "bar", "_f": "i"}
 	serialized := serializeTags(name, tags)
 	if serialized != expected {
-		t.Errorf("Serialized output (%s) didn't match expected output", serialized)
+		t.Errorf("Serialized output (%s) didn't match expected output: %s",
+			serialized, expected)
 	}
 }
 
@@ -30,7 +32,8 @@ func TestSerializeIllegalTags(t *testing.T) {
 	tags := map[string]string{"foo": "b|a:r", "q": "p"}
 	serialized := serializeTags(name, tags)
 	if serialized != expected {
-		t.Errorf("Serialized output (%s) didn't match expected output", serialized)
+		t.Errorf("Serialized output (%s) didn't match expected output: %s",
+			serialized, expected)
 	}
 }
 
@@ -40,7 +43,8 @@ func TestSerializeTagValuePeriod(t *testing.T) {
 	tags := map[string]string{"foo": "blah.blah", "q": "p"}
 	serialized := serializeTags(name, tags)
 	if serialized != expected {
-		t.Errorf("Serialized output (%s) didn't match expected output", serialized)
+		t.Errorf("Serialized output (%s) didn't match expected output: %s",
+			serialized, expected)
 	}
 }
 
@@ -52,6 +56,29 @@ func BenchmarkSerializeTags(b *testing.B) {
 		"tag3": "val3",
 		"tag4": "val4",
 		"tag5": "val5",
+	}
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		serializeTags(name, tags)
+	}
+}
+
+func BenchmarkSerializeTags_One(b *testing.B) {
+	const name = "prefix"
+	tags := map[string]string{
+		"tag1": "val1",
+	}
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		serializeTags(name, tags)
+	}
+}
+
+func BenchmarkSerializeTags_Two(b *testing.B) {
+	const name = "prefix"
+	tags := map[string]string{
+		"tag1": "val1",
+		"tag2": "val2",
 	}
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
