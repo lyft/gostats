@@ -175,3 +175,10 @@ func TestSink_ThreadSafe_Reset(t *testing.T) {
 	wg.Wait()
 	close(done)
 }
+
+// TestFatalExample is an example usage of Fatal()
+func TestFatalExample(t *testing.T) {
+	sink := NewSink()
+	sink.FlushCounter("name", 1)
+	sink.AssertCounterEquals(Fatal(t), "name", 1)
+}

@@ -1,6 +1,7 @@
 package mock
 
 import (
+	"fmt"
 	"math"
 	"sync"
 	"sync/atomic"
@@ -301,4 +302,44 @@ func (s *Sink) AssertTimerCallCount(tb testing.TB, name string, exp int) {
 		tb.Errorf("gostats/mock: Timer (%q) Call Count: Expected: %d Got: %d",
 			name, exp, n)
 	}
+}
+
+var (
+	_ testing.TB = (*fatalTest)(nil)
+	_ testing.TB = (*fatalBench)(nil)
+)
+
+type fatalTest testing.T
+
+func (t *fatalTest) Errorf(format string, args ...interface{}) {
+	t.Fatalf(format, args...)
+}
+
+type fatalBench testing.B
+
+func (t *fatalBench) Errorf(format string, args ...interface{}) {
+	t.Fatalf(format, args...)
+}
+
+// Fatal is a wrapper around *testing.T and *testing.B that causes Sink Assert*
+// methods to immediately fail a test and stop execution. Otherwise, the Assert
+// methods call tb.Errorf(), which marks the test as failed, but allows
+// execution to continue.
+//
+// Examples of Fatal() can be found in the sink test code.
+//
+// 	var sink Sink
+// 	var t *testing.T
+// 	sink.AssertCounterEquals(Must(t), "name", 1)
+//
+func Fatal(tb testing.TB) testing.TB {
+	switch t := tb.(type) {
+	case *testing.T:
+		return (*fatalTest)(t)
+	case *testing.B:
+		return (*fatalBench)(t)
+	default:
+		fmt.Sprintf("invalid type for testing.TB: %T", tb)
+	}
+	panic("unreachable")
 }
