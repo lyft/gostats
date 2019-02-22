@@ -2,9 +2,9 @@ package stats
 
 import "sync"
 
-// DEPRECATED: use "github.com/lyft/gostats/mock" instead.
-//
 // MockSink describes an in-memory Sink used for testing.
+//
+// DEPRECATED: use "github.com/lyft/gostats/mock" instead.
 type MockSink struct {
 	Counters map[string]uint64
 	Timers   map[string]uint64
@@ -15,10 +15,10 @@ type MockSink struct {
 	gLock sync.Mutex
 }
 
-// DEPRECATED: use "github.com/lyft/gostats/mock" instead.
-//
 // NewMockSink returns a MockSink that flushes stats to in-memory maps. An
 // instance of MockSink is not safe for concurrent use.
+//
+// DEPRECATED: use "github.com/lyft/gostats/mock" instead.
 func NewMockSink() (m *MockSink) {
 	m = &MockSink{
 		Counters: make(map[string]uint64),
