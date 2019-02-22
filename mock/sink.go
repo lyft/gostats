@@ -173,10 +173,11 @@ func (s *Sink) AssertCounterEquals(tb testing.TB, name string, exp uint64) {
 	tb.Helper()
 	u, ok := s.LoadCounter(name)
 	if !ok {
-		tb.Fatalf("gostats/mock: Counter (%q): not found", name)
+		tb.Errorf("gostats/mock: Counter (%q): not found", name)
+		return
 	}
 	if u != exp {
-		tb.Fatalf("gostats/mock: Counter (%q): Expected: %d Got: %d", name, exp, u)
+		tb.Errorf("gostats/mock: Counter (%q): Expected: %d Got: %d", name, exp, u)
 	}
 }
 
@@ -185,10 +186,11 @@ func (s *Sink) AssertGaugeEquals(tb testing.TB, name string, exp uint64) {
 	tb.Helper()
 	u, ok := s.LoadGauge(name)
 	if !ok {
-		tb.Fatalf("gostats/mock: Gauge (%q): not found", name)
+		tb.Errorf("gostats/mock: Gauge (%q): not found", name)
+		return
 	}
 	if u != exp {
-		tb.Fatalf("gostats/mock: Gauge (%q): Expected: %d Got: %d", name, exp, u)
+		tb.Errorf("gostats/mock: Gauge (%q): Expected: %d Got: %d", name, exp, u)
 	}
 }
 
@@ -197,10 +199,11 @@ func (s *Sink) AssertTimerEquals(tb testing.TB, name string, exp float64) {
 	tb.Helper()
 	f, ok := s.LoadTimer(name)
 	if !ok {
-		tb.Fatalf("gostats/mock: Timer (%q): not found", name)
+		tb.Errorf("gostats/mock: Timer (%q): not found", name)
+		return
 	}
 	if f != exp {
-		tb.Fatalf("gostats/mock: Timer (%q): Expected: %f Got: %f", name, exp, f)
+		tb.Errorf("gostats/mock: Timer (%q): Expected: %f Got: %f", name, exp, f)
 	}
 }
 
@@ -208,7 +211,7 @@ func (s *Sink) AssertTimerEquals(tb testing.TB, name string, exp float64) {
 func (s *Sink) AssertCounterExists(tb testing.TB, name string) {
 	tb.Helper()
 	if _, ok := s.LoadCounter(name); !ok {
-		tb.Fatalf("gostats/mock: Counter (%q): should exist", name)
+		tb.Errorf("gostats/mock: Counter (%q): should exist", name)
 	}
 }
 
@@ -216,7 +219,7 @@ func (s *Sink) AssertCounterExists(tb testing.TB, name string) {
 func (s *Sink) AssertGaugeExists(tb testing.TB, name string) {
 	tb.Helper()
 	if _, ok := s.LoadGauge(name); !ok {
-		tb.Fatalf("gostats/mock: Gauge (%q): should exist", name)
+		tb.Errorf("gostats/mock: Gauge (%q): should exist", name)
 	}
 }
 
@@ -224,7 +227,7 @@ func (s *Sink) AssertGaugeExists(tb testing.TB, name string) {
 func (s *Sink) AssertTimerExists(tb testing.TB, name string) {
 	tb.Helper()
 	if _, ok := s.LoadTimer(name); !ok {
-		tb.Fatalf("gostats/mock: Timer (%q): should exist", name)
+		tb.Errorf("gostats/mock: Timer (%q): should exist", name)
 	}
 }
 
@@ -232,7 +235,7 @@ func (s *Sink) AssertTimerExists(tb testing.TB, name string) {
 func (s *Sink) AssertCounterNotExists(tb testing.TB, name string) {
 	tb.Helper()
 	if _, ok := s.LoadCounter(name); ok {
-		tb.Fatalf("gostats/mock: Counter (%q): expected Counter to not exist", name)
+		tb.Errorf("gostats/mock: Counter (%q): expected Counter to not exist", name)
 	}
 }
 
@@ -240,7 +243,7 @@ func (s *Sink) AssertCounterNotExists(tb testing.TB, name string) {
 func (s *Sink) AssertGaugeNotExists(tb testing.TB, name string) {
 	tb.Helper()
 	if _, ok := s.LoadGauge(name); ok {
-		tb.Fatalf("gostats/mock: Gauge (%q): expected Gauge to not exist", name)
+		tb.Errorf("gostats/mock: Gauge (%q): expected Gauge to not exist", name)
 	}
 }
 
@@ -248,7 +251,7 @@ func (s *Sink) AssertGaugeNotExists(tb testing.TB, name string) {
 func (s *Sink) AssertTimerNotExists(tb testing.TB, name string) {
 	tb.Helper()
 	if _, ok := s.LoadTimer(name); ok {
-		tb.Fatalf("gostats/mock: Timer (%q): expected Timer to not exist", name)
+		tb.Errorf("gostats/mock: Timer (%q): expected Timer to not exist", name)
 	}
 }
 
@@ -257,12 +260,13 @@ func (s *Sink) AssertCounterCallCount(tb testing.TB, name string, exp int) {
 	tb.Helper()
 	v, ok := s.counters.Load(name)
 	if !ok {
-		tb.Fatalf("gostats/mock: Counter (%q): not found", name)
+		tb.Errorf("gostats/mock: Counter (%q): not found", name)
+		return
 	}
 	p := v.(*entry)
 	n := atomic.LoadInt64(&p.count)
 	if n != int64(exp) {
-		tb.Fatalf("gostats/mock: Counter (%q) Call Count: Expected: %d Got: %d",
+		tb.Errorf("gostats/mock: Counter (%q) Call Count: Expected: %d Got: %d",
 			name, exp, n)
 	}
 }
@@ -272,12 +276,13 @@ func (s *Sink) AssertGaugeCallCount(tb testing.TB, name string, exp int) {
 	tb.Helper()
 	v, ok := s.gauges.Load(name)
 	if !ok {
-		tb.Fatalf("gostats/mock: Gauge (%q): not found", name)
+		tb.Errorf("gostats/mock: Gauge (%q): not found", name)
+		return
 	}
 	p := v.(*entry)
 	n := atomic.LoadInt64(&p.count)
 	if n != int64(exp) {
-		tb.Fatalf("gostats/mock: Gauge (%q) Call Count: Expected: %d Got: %d",
+		tb.Errorf("gostats/mock: Gauge (%q) Call Count: Expected: %d Got: %d",
 			name, exp, n)
 	}
 }
@@ -287,12 +292,13 @@ func (s *Sink) AssertTimerCallCount(tb testing.TB, name string, exp int) {
 	tb.Helper()
 	v, ok := s.timers.Load(name)
 	if !ok {
-		tb.Fatalf("gostats/mock: Timer (%q): not found", name)
+		tb.Errorf("gostats/mock: Timer (%q): not found", name)
+		return
 	}
 	p := v.(*entry)
 	n := atomic.LoadInt64(&p.count)
 	if n != int64(exp) {
-		tb.Fatalf("gostats/mock: Timer (%q) Call Count: Expected: %d Got: %d",
+		tb.Errorf("gostats/mock: Timer (%q) Call Count: Expected: %d Got: %d",
 			name, exp, n)
 	}
 }
