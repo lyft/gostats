@@ -8,12 +8,14 @@ import (
 	"strings"
 	"sync"
 	"testing"
+
+	"github.com/lyft/gostats/mock"
 )
 
 func TestHttpHandler_ServeHTTP(t *testing.T) {
 	t.Parallel()
 
-	sink := NewMockSink()
+	sink := mock.NewSink()
 	store := NewStore(sink, false)
 
 	h := NewStatHandler(
@@ -67,24 +69,7 @@ func TestHttpHandler_ServeHTTP(t *testing.T) {
 
 	wg.Wait()
 
-	timer, ok := sink.Timers[requestTimer]
-	if !ok {
-		t.Errorf("wanted a %q timer, none found", requestTimer)
-	} else if timer != 2 {
-		t.Error("wanted 2, got", timer)
-	}
-
-	c, ok := sink.Counters["200"]
-	if !ok {
-		t.Error("wanted a '200' counter, none found")
-	} else if c != 1 {
-		t.Error("wanted 1, got", c)
-	}
-
-	c, ok = sink.Counters["404"]
-	if !ok {
-		t.Error("wanted a '404' counter, none found")
-	} else if c != 1 {
-		t.Error("wanted 1, got", c)
-	}
+	sink.AssertTimerCallCount(t, requestTimer, 2)
+	sink.AssertCounterEquals(t, "200", 1)
+	sink.AssertCounterEquals(t, "404", 1)
 }
