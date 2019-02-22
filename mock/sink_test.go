@@ -27,19 +27,6 @@ func TestFlushTimer(t *testing.T) {
 	sink.AssertTimerEquals(t, "timer", math.SmallestNonzeroFloat64)
 }
 
-// func (s *Sink) FlushCounter(name string, val uint64)
-// func (s *Sink) FlushGauge(name string, val uint64)
-// func (s *Sink) FlushTimer(name string, val float64)
-// func (s *Sink) LoadCounter(name string) (uint64, bool)
-// func (s *Sink) LoadGauge(name string) (uint64, bool)
-// func (s *Sink) LoadTimer(name string) (float64, bool)
-// func (s *Sink) Counter(name string) uint64
-// func (s *Sink) Gauge(name string) uint64
-// func (s *Sink) Timer(name string) float64
-// func (s *Sink) CounterCallCount(name string) int64
-// func (s *Sink) GaugeCallCount(name string) int64
-// func (s *Sink) TimerCallCount(name string) int64
-
 func TestThreadSafeSinkReset(t *testing.T) {
 	const N = 2000
 	sink := NewSink()
