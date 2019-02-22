@@ -25,7 +25,7 @@ func NewSink() *Sink {
 }
 
 // Flush is a no-op method
-func (*Sink) Flush() {}
+func (Sink) Flush() {}
 
 func (s *Sink) Reset() {
 	s.mu.Lock()
