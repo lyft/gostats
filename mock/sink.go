@@ -7,7 +7,7 @@ import (
 	"testing"
 )
 
-type value struct {
+type entry struct {
 	val   uint64
 	count int64
 }
@@ -39,10 +39,10 @@ func (s *Sink) FlushCounter(name string, val uint64) {
 	s.mu.RLock()
 	v, ok := s.counters.Load(name)
 	if !ok {
-		v, _ = s.counters.LoadOrStore(name, new(value))
+		v, _ = s.counters.LoadOrStore(name, new(entry))
 	}
 	s.mu.RUnlock()
-	p := v.(*value)
+	p := v.(*entry)
 	atomic.AddUint64(&p.val, val)
 	atomic.AddInt64(&p.count, 1)
 }
@@ -51,10 +51,10 @@ func (s *Sink) FlushGauge(name string, val uint64) {
 	s.mu.RLock()
 	v, ok := s.gauges.Load(name)
 	if !ok {
-		v, _ = s.gauges.LoadOrStore(name, new(value))
+		v, _ = s.gauges.LoadOrStore(name, new(entry))
 	}
 	s.mu.RUnlock()
-	p := v.(*value)
+	p := v.(*entry)
 	atomic.AddUint64(&p.val, val)
 	atomic.AddInt64(&p.count, 1)
 }
@@ -75,10 +75,10 @@ func (s *Sink) FlushTimer(name string, val float64) {
 	s.mu.RLock()
 	v, ok := s.timers.Load(name)
 	if !ok {
-		v, _ = s.timers.LoadOrStore(name, new(value))
+		v, _ = s.timers.LoadOrStore(name, new(entry))
 	}
 	s.mu.RUnlock()
-	p := v.(*value)
+	p := v.(*entry)
 	atomicAddFloat64(&p.val, val)
 	atomic.AddInt64(&p.count, 1)
 }
@@ -88,7 +88,7 @@ func (s *Sink) LoadCounter(name string) (uint64, bool) {
 	v, ok := s.counters.Load(name)
 	s.mu.RUnlock()
 	if ok {
-		p := v.(*value)
+		p := v.(*entry)
 		return atomic.LoadUint64(&p.val), true
 	}
 	return 0, false
@@ -99,7 +99,7 @@ func (s *Sink) LoadGauge(name string) (uint64, bool) {
 	v, ok := s.gauges.Load(name)
 	s.mu.RUnlock()
 	if ok {
-		p := v.(*value)
+		p := v.(*entry)
 		return atomic.LoadUint64(&p.val), true
 	}
 	return 0, false
@@ -110,7 +110,7 @@ func (s *Sink) LoadTimer(name string) (float64, bool) {
 	v, ok := s.timers.Load(name)
 	s.mu.RUnlock()
 	if ok {
-		p := v.(*value)
+		p := v.(*entry)
 		bits := atomic.LoadUint64(&p.val)
 		return math.Float64frombits(bits), true
 	}
@@ -141,7 +141,7 @@ func (s *Sink) CounterCallCount(name string) int64 {
 	v, ok := s.counters.Load(name)
 	s.mu.RUnlock()
 	if ok {
-		return atomic.LoadInt64(&v.(*value).count)
+		return atomic.LoadInt64(&v.(*entry).count)
 	}
 	return 0
 }
@@ -151,7 +151,7 @@ func (s *Sink) GaugeCallCount(name string) int64 {
 	v, ok := s.gauges.Load(name)
 	s.mu.RUnlock()
 	if ok {
-		return atomic.LoadInt64(&v.(*value).count)
+		return atomic.LoadInt64(&v.(*entry).count)
 	}
 	return 0
 }
@@ -161,7 +161,7 @@ func (s *Sink) TimerCallCount(name string) int64 {
 	v, ok := s.timers.Load(name)
 	s.mu.RUnlock()
 	if ok {
-		return atomic.LoadInt64(&v.(*value).count)
+		return atomic.LoadInt64(&v.(*entry).count)
 	}
 	return 0
 }
@@ -259,7 +259,7 @@ func (s *Sink) AssertCounterCallCount(tb testing.TB, name string, exp int) {
 	if !ok {
 		tb.Fatalf("gostats/mock: Counter (%q): not found", name)
 	}
-	p := v.(*value)
+	p := v.(*entry)
 	n := atomic.LoadInt64(&p.count)
 	if n != int64(exp) {
 		tb.Fatalf("gostats/mock: Counter (%q) Call Count: Expected: %d Got: %d",
@@ -274,7 +274,7 @@ func (s *Sink) AssertGaugeCallCount(tb testing.TB, name string, exp int) {
 	if !ok {
 		tb.Fatalf("gostats/mock: Gauge (%q): not found", name)
 	}
-	p := v.(*value)
+	p := v.(*entry)
 	n := atomic.LoadInt64(&p.count)
 	if n != int64(exp) {
 		tb.Fatalf("gostats/mock: Gauge (%q) Call Count: Expected: %d Got: %d",
@@ -289,7 +289,7 @@ func (s *Sink) AssertTimerCallCount(tb testing.TB, name string, exp int) {
 	if !ok {
 		tb.Fatalf("gostats/mock: Timer (%q): not found", name)
 	}
-	p := v.(*value)
+	p := v.(*entry)
 	n := atomic.LoadInt64(&p.count)
 	if n != int64(exp) {
 		tb.Fatalf("gostats/mock: Timer (%q) Call Count: Expected: %d Got: %d",
