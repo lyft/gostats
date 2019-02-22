@@ -44,6 +44,7 @@ func TestThreadSafeSinkReset(t *testing.T) {
 	const N = 2000
 	sink := NewSink()
 	funcs := [...]func(){
+		sink.Flush,
 		func() { sink.FlushCounter("name", 1) },
 		func() { sink.FlushGauge("name", 1) },
 		func() { sink.FlushTimer("name", 1) },
