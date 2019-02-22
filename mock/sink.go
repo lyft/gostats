@@ -18,7 +18,8 @@ type Sink struct {
 	counters sync.Map
 	timers   sync.Map
 	gauges   sync.Map
-	mu       sync.RWMutex // reset lock
+	// write held only during Reset(), all map accesses must hold the read lock
+	mu sync.RWMutex
 }
 
 func NewSink() *Sink {
