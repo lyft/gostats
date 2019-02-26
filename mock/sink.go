@@ -360,5 +360,4 @@ func Fatal(tb testing.TB) testing.TB {
 	default:
 		panic(fmt.Sprintf("invalid type for testing.TB: %T", tb))
 	}
-	panic("unreachable")
 }
