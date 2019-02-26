@@ -340,7 +340,7 @@ func Fatal(tb testing.TB) testing.TB {
 	case *testing.B:
 		return (*fatalBench)(t)
 	default:
-		fmt.Sprintf("invalid type for testing.TB: %T", tb)
+		panic(fmt.Sprintf("invalid type for testing.TB: %T", tb))
 	}
 	panic("unreachable")
 }
