@@ -22,6 +22,8 @@ type Sink struct {
 	mu sync.RWMutex
 }
 
+// NewSink returns a new Sink which implements the stats.Sink interface and is
+// suitable for testing.
 func NewSink() *Sink {
 	return new(Sink)
 }
@@ -29,6 +31,7 @@ func NewSink() *Sink {
 // Flush is a no-op method
 func (*Sink) Flush() {}
 
+// Reset resets the Sink's counters, timers and gauges to zero.
 func (s *Sink) Reset() {
 	s.mu.Lock()
 	s.counters = sync.Map{}
@@ -37,6 +40,8 @@ func (s *Sink) Reset() {
 	s.mu.Unlock()
 }
 
+// FlushCounter implements the stats.Sink.FlushCounter method and adds val to
+// stat name.
 func (s *Sink) FlushCounter(name string, val uint64) {
 	s.mu.RLock()
 	v, ok := s.counters.Load(name)
@@ -49,6 +54,8 @@ func (s *Sink) FlushCounter(name string, val uint64) {
 	atomic.AddInt64(&p.count, 1)
 }
 
+// FlushGauge implements the stats.Sink.FlushGauge method and adds val to
+// stat name.
 func (s *Sink) FlushGauge(name string, val uint64) {
 	s.mu.RLock()
 	v, ok := s.gauges.Load(name)
@@ -73,6 +80,8 @@ func atomicAddFloat64(dest *uint64, delta float64) {
 	}
 }
 
+// FlushTimer implements the stats.Sink.FlushTimer method and adds val to
+// stat name.
 func (s *Sink) FlushTimer(name string, val float64) {
 	s.mu.RLock()
 	v, ok := s.timers.Load(name)
@@ -85,6 +94,7 @@ func (s *Sink) FlushTimer(name string, val float64) {
 	atomic.AddInt64(&p.count, 1)
 }
 
+// LoadCounter returns the value for stat name and if it was found.
 func (s *Sink) LoadCounter(name string) (uint64, bool) {
 	s.mu.RLock()
 	v, ok := s.counters.Load(name)
@@ -96,6 +106,7 @@ func (s *Sink) LoadCounter(name string) (uint64, bool) {
 	return 0, false
 }
 
+// LoadGauge returns the value for stat name and if it was found.
 func (s *Sink) LoadGauge(name string) (uint64, bool) {
 	s.mu.RLock()
 	v, ok := s.gauges.Load(name)
@@ -107,6 +118,7 @@ func (s *Sink) LoadGauge(name string) (uint64, bool) {
 	return 0, false
 }
 
+// LoadTimer returns the value for stat name and if it was found.
 func (s *Sink) LoadTimer(name string) (float64, bool) {
 	s.mu.RLock()
 	v, ok := s.timers.Load(name)
@@ -121,16 +133,19 @@ func (s *Sink) LoadTimer(name string) (float64, bool) {
 
 // short-hand methods
 
+// Counter is shorthand for LoadCounter, zero is returned if the stat is not found.
 func (s *Sink) Counter(name string) uint64 {
 	v, _ := s.LoadCounter(name)
 	return v
 }
 
+// Gauge is shorthand for LoadGauge, zero is returned if the stat is not found.
 func (s *Sink) Gauge(name string) uint64 {
 	v, _ := s.LoadGauge(name)
 	return v
 }
 
+// Timer is shorthand for LoadTimer, zero is returned if the stat is not found.
 func (s *Sink) Timer(name string) float64 {
 	v, _ := s.LoadTimer(name)
 	return v
@@ -138,6 +153,7 @@ func (s *Sink) Timer(name string) float64 {
 
 // these methods are mostly useful for testing
 
+// CounterCallCount returns the number of times stat name has been called/updated.
 func (s *Sink) CounterCallCount(name string) int64 {
 	s.mu.RLock()
 	v, ok := s.counters.Load(name)
@@ -148,6 +164,7 @@ func (s *Sink) CounterCallCount(name string) int64 {
 	return 0
 }
 
+// GaugeCallCount returns the number of times stat name has been called/updated.
 func (s *Sink) GaugeCallCount(name string) int64 {
 	s.mu.RLock()
 	v, ok := s.gauges.Load(name)
@@ -158,6 +175,7 @@ func (s *Sink) GaugeCallCount(name string) int64 {
 	return 0
 }
 
+// TimerCallCount returns the number of times stat name has been called/updated.
 func (s *Sink) TimerCallCount(name string) int64 {
 	s.mu.RLock()
 	v, ok := s.timers.Load(name)
@@ -340,7 +358,6 @@ func Fatal(tb testing.TB) testing.TB {
 	case *testing.B:
 		return (*fatalBench)(t)
 	default:
-		fmt.Sprintf("invalid type for testing.TB: %T", tb)
+		panic(fmt.Sprintf("invalid type for testing.TB: %T", tb))
 	}
-	panic("unreachable")
 }
