@@ -20,7 +20,6 @@ func serializeTags(name string, tags map[string]string) string {
 	const prefix = ".__"
 	const sep = "="
 
-	// switch len(tags) {
 	switch len(tags) {
 	case 0:
 		return name
