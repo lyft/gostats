@@ -1,8 +1,32 @@
 package stats
 
 import (
+	"bytes"
+	"fmt"
+	"sort"
 	"testing"
 )
+
+// Reference serializeTags implementation
+func serializeTagsReference(name string, tags map[string]string) string {
+	const prefix = ".__"
+	const sep = "="
+	if len(tags) == 0 {
+		return name
+	}
+	tagPairs := make([]tagPair, 0, len(tags))
+	for tagKey, tagValue := range tags {
+		tagValue = replaceChars(tagValue)
+		tagPairs = append(tagPairs, tagPair{tagKey, tagValue})
+	}
+	sort.Sort(tagSet(tagPairs))
+
+	buf := new(bytes.Buffer)
+	for _, tag := range tagPairs {
+		fmt.Fprint(buf, prefix, tag.dimension, sep, tag.value)
+	}
+	return name + buf.String()
+}
 
 func TestSerializeTags(t *testing.T) {
 	const name = "prefix"
@@ -12,6 +36,30 @@ func TestSerializeTags(t *testing.T) {
 	if serialized != expected {
 		t.Errorf("Serialized output (%s) didn't match expected output: %s",
 			serialized, expected)
+	}
+}
+
+// Test that the optimized serializeTags() function matches the reference
+// implementation.
+func TestSerializeTagsReference(t *testing.T) {
+	const name = "prefix"
+	makeTags := func(n int) map[string]string {
+		m := make(map[string]string, n)
+		for i := 0; i < n; i++ {
+			k := fmt.Sprintf("key%d", i)
+			v := fmt.Sprintf("val%d", i)
+			m[k] = v
+		}
+		return m
+	}
+	for i := 0; i < 100; i++ {
+		tags := makeTags(i)
+		expected := serializeTagsReference(name, tags)
+		serialized := serializeTags(name, tags)
+		if serialized != expected {
+			t.Errorf("%d Serialized output (%s) didn't match expected output: %s",
+				i, serialized, expected)
+		}
 	}
 }
 
