@@ -30,16 +30,59 @@ func serializeTags(name string, tags map[string]string) string {
 		}
 		panic("unreachable")
 	case 2:
-		var a, b tagPair
+		var t0, t1 tagPair
 		for k, v := range tags {
-			b = a
-			a = tagPair{k, replaceChars(v)}
+			t1 = t0
+			t0 = tagPair{k, replaceChars(v)}
 		}
-		if a.dimension > b.dimension {
-			a, b = b, a
+		if t0.dimension > t1.dimension {
+			t0, t1 = t1, t0
 		}
-		return name + prefix + a.dimension + sep + a.value +
-			prefix + b.dimension + sep + b.value
+		return name + prefix + t0.dimension + sep + t0.value +
+			prefix + t1.dimension + sep + t1.value
+	case 3:
+		var t0, t1, t2 tagPair
+		for k, v := range tags {
+			t2 = t1
+			t1 = t0
+			t0 = tagPair{k, replaceChars(v)}
+		}
+		if t1.dimension > t2.dimension {
+			t1, t2 = t2, t1
+		}
+		if t0.dimension > t2.dimension {
+			t0, t2 = t2, t0
+		}
+		if t0.dimension > t1.dimension {
+			t0, t1 = t1, t0
+		}
+		return name + prefix + t0.dimension + sep + t0.value +
+			prefix + t1.dimension + sep + t1.value +
+			prefix + t2.dimension + sep + t2.value
+	case 4:
+		var t0, t1, t2, t3 tagPair
+		for k, v := range tags {
+			t3 = t2
+			t2 = t1
+			t1 = t0
+			t0 = tagPair{k, replaceChars(v)}
+		}
+		if t0.dimension > t1.dimension {
+			t0, t1 = t1, t0
+		}
+		if t2.dimension > t3.dimension {
+			t2, t3 = t3, t2
+		}
+		if t0.dimension > t2.dimension {
+			t0, t2 = t2, t0
+		}
+		if t1.dimension > t2.dimension {
+			t1, t2 = t2, t1
+		}
+		return name + prefix + t0.dimension + sep + t0.value +
+			prefix + t1.dimension + sep + t1.value +
+			prefix + t2.dimension + sep + t2.value +
+			prefix + t3.dimension + sep + t3.value
 	default:
 		// n stores the length of the serialized name + tags
 		n := (len(prefix) + len(sep)) * len(tags)
