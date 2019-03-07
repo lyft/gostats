@@ -16,6 +16,55 @@ func (t tagSet) Len() int           { return len(t) }
 func (t tagSet) Swap(i, j int)      { t[i], t[j] = t[j], t[i] }
 func (t tagSet) Less(i, j int) bool { return t[i].dimension < t[j].dimension }
 
+// WARN
+func serializeTagSet(name string, tags tagSet) string {
+	const prefix = ".__"
+	const sep = "="
+
+	// CEV: we assume/require that invalid chars have been replaced
+
+	// switch len(tags) {
+	switch len(tags) {
+	case 0:
+		return name
+	case 1:
+		return name + prefix + tags[0].dimension + sep + tags[0].value
+	case 2:
+		_ = tags[1] // BCE
+		return name + prefix +
+			tags[0].dimension + sep + tags[0].value +
+			tags[1].dimension + sep + tags[1].value
+	case 3:
+		_ = tags[2] // BCE
+		return name + prefix +
+			tags[0].dimension + sep + tags[0].value +
+			tags[1].dimension + sep + tags[1].value +
+			tags[2].dimension + sep + tags[2].value
+	case 4:
+		_ = tags[3] // BCE
+		return name + prefix +
+			tags[0].dimension + sep + tags[0].value +
+			tags[1].dimension + sep + tags[1].value +
+			tags[2].dimension + sep + tags[2].value +
+			tags[3].dimension + sep + tags[3].value
+	default:
+		n := (len(prefix) + len(sep)) * len(tags)
+		n += len(name)
+		for _, t := range tags {
+			n += len(t.dimension) + len(t.value)
+		}
+		b := make([]byte, 0, n)
+		b = append(b, name...)
+		for _, tag := range tags {
+			b = append(b, prefix...)
+			b = append(b, tag.dimension...)
+			b = append(b, sep...)
+			b = append(b, tag.value...)
+		}
+		return *(*string)(unsafe.Pointer(&b))
+	}
+}
+
 func serializeTags(name string, tags map[string]string) string {
 	const prefix = ".__"
 	const sep = "="

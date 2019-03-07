@@ -6,12 +6,124 @@ import (
 	"fmt"
 	"io"
 	"math/rand"
+	"reflect"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
 	"testing"
 	"time"
 )
+
+func testMergePairs(t *testing.T, base, sub map[string]string) {
+	t.Helper()
+
+	s := subScope{
+		tags:  base,
+		pairs: newTagSet(base),
+	}
+
+	var expected tagSet
+	for k, v := range s.mergeTags(sub) {
+		expected = append(expected, tagPair{
+			dimension: k,
+			value:     v,
+		})
+	}
+	sort.Sort(expected)
+
+	pairs := s.mergePairs(sub)
+	if !reflect.DeepEqual(expected, pairs) {
+		t.Logf("Base: %v\n", base)
+		t.Logf("Sub: %v\n", sub)
+		t.Errorf("Expected (%d): %v Got (%d): %v",
+			len(expected), expected, len(pairs), pairs)
+	}
+}
+
+func TestMergePairs(t *testing.T) {
+
+	t.Run("Simple", func(t *testing.T) {
+		base := map[string]string{
+			"tag1": "val1",
+			"tag2": "val2",
+			"tag5": "val5",
+		}
+		sub := map[string]string{
+			"tag1": "sub1",
+			"tagX": "subX",
+			"tag5": "sub5",
+		}
+		testMergePairs(t, base, sub)
+	})
+
+	t.Run("Equal_Pairs", func(t *testing.T) {
+		base := map[string]string{
+			"tag1": "val1",
+			"tag2": "val2",
+			"tag3": "val3",
+		}
+		sub := map[string]string{
+			"tag1": "val1",
+			"tag2": "val2",
+			"tag3": "val3",
+		}
+		testMergePairs(t, base, sub)
+	})
+
+	t.Run("Small", func(t *testing.T) {
+		base := map[string]string{
+			"tag1": "val1",
+		}
+		sub := map[string]string{
+			"tag1": "sub1",
+		}
+		testMergePairs(t, base, sub)
+	})
+
+	t.Run("None", func(t *testing.T) {
+		base := map[string]string{}
+		sub := map[string]string{}
+		testMergePairs(t, base, sub)
+	})
+
+	makeTags := func(prefix string, n int) map[string]string {
+		m := make(map[string]string, n)
+		for i := 0; i < n; i++ {
+			k := fmt.Sprintf("%s_key%d", prefix, i)
+			v := fmt.Sprintf("%s_val%d", prefix, i)
+			m[k] = v
+		}
+		return m
+	}
+
+	rr := rand.New(rand.NewSource(time.Now().UnixNano()))
+
+	for i := 0; i < 10; i++ {
+		t.Run(fmt.Sprintf("Random_%d", i), func(t *testing.T) {
+			base := makeTags("base", rr.Intn(50))
+			sub := makeTags("sub", rr.Intn(50))
+
+			// interleave the maps so that sub has some identical
+			// keys and some keys with different values
+			var (
+				equalKV = 5 // same pair
+				sameK   = 5 // same key - different value
+			)
+			for k, v := range base {
+				switch {
+				case equalKV > 0:
+					sub[k] = v
+					equalKV--
+				case sameK > 0:
+					sub[k] = v + "_X"
+					sameK--
+				}
+			}
+			testMergePairs(t, base, sub)
+		})
+	}
+}
 
 // Ensure flushing and adding generators does not race
 func TestStats(t *testing.T) {
@@ -88,7 +200,7 @@ func BenchmarkStore_NewCounterWithTags(b *testing.B) {
 	}
 }
 
-func initBenchScope() (scope Scope, childTags map[string]string) {
+func initBenchScope() (scope *subScope, childTags map[string]string) {
 	s := NewStore(nullSink{}, false)
 
 	t := time.NewTicker(time.Hour) // don't flush
@@ -105,15 +217,50 @@ func initBenchScope() (scope Scope, childTags map[string]string) {
 		childTags["c"+tag] = "c" + val
 	}
 
-	scope = s.ScopeWithTags("scope", scopeTags)
+	scope = s.ScopeWithTags("scope", scopeTags).(*subScope)
 	return
 }
 
 func BenchmarkStore_ScopeWithTags(b *testing.B) {
-	scope, childTags := initBenchScope()
+	// scope, childTags := initBenchScope()
+	scope, _ := initBenchScope()
 	b.ResetTimer()
+	n := 0
+	x := strconv.Itoa(n)
 	for i := 0; i < b.N; i++ {
-		scope.NewCounterWithTags("counter_name", childTags)
+		// scope.NewCounterWithTags("counter_name", childTags).Add(1)
+		scope.NewCounterWithTags("counter_name", map[string]string{
+			"tag1": "sub1",
+			"tagX": "subX",
+			"tag5": "sub5",
+			"X":    x,
+		}).Add(1)
+		if i%256 == 0 {
+			n++
+			x = strconv.Itoa(n)
+		}
+	}
+}
+
+func BenchmarkStore_ScopeWithTags_Pairs(b *testing.B) {
+	// scope, childTags := initBenchScope()
+	scope, _ := initBenchScope()
+	scope.pairs = newTagSet(scope.tags)
+	b.ResetTimer()
+	n := 0
+	x := strconv.Itoa(n)
+	for i := 0; i < b.N; i++ {
+		// scope.NewCounterWithTags("counter_name", childTags).Add(1)
+		scope.NewCounterWithTags_X("counter_name", map[string]string{
+			"tag1": "sub1",
+			"tagX": "subX",
+			"tag5": "sub5",
+			"X":    x,
+		}).Add(1)
+		if i%256 == 0 {
+			n++
+			x = strconv.Itoa(n)
+		}
 	}
 }
 
@@ -152,4 +299,60 @@ func BenchmarkParallelCounter(b *testing.B) {
 			s.NewCounter(keys[n%N]).Inc()
 		}
 	})
+}
+
+func BenchmarkMergeTags(b *testing.B) {
+	// base := map[string]string{
+	// 	"tag1": "val1",
+	// 	"tag2": "val2",
+	// 	"tag3": "val3",
+	// 	"tag4": "val4",
+	// 	"tag5": "val5",
+	// }
+	base := make(map[string]string)
+	for i := 0; i < 6; i++ {
+		k := fmt.Sprintf("%dtag", i)
+		v := fmt.Sprintf("%dval", i)
+		base[k] = v
+	}
+	s := subScope{
+		tags:  base,
+		pairs: newTagSet(base),
+	}
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		s.mergeTags(map[string]string{
+			"tag1": "sub1",
+			"tagX": "subX",
+			"tag5": "sub5",
+		})
+	}
+}
+
+func BenchmarkMergePairs(b *testing.B) {
+	// base := map[string]string{
+	// 	"tag1": "val1",
+	// 	"tag2": "val2",
+	// 	"tag3": "val3",
+	// 	"tag4": "val4",
+	// 	"tag5": "val5",
+	// }
+	base := make(map[string]string)
+	for i := 0; i < 6; i++ {
+		k := fmt.Sprintf("%dtag", i)
+		v := fmt.Sprintf("%dval", i)
+		base[k] = v
+	}
+	s := subScope{
+		tags:  base,
+		pairs: newTagSet(base),
+	}
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		s.mergePairs(map[string]string{
+			"tag1": "sub1",
+			"tagX": "subX",
+			"tag5": "sub5",
+		})
+	}
 }

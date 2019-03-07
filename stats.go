@@ -2,6 +2,7 @@ package stats
 
 import (
 	"expvar"
+	"sort"
 	"strconv"
 	"sync"
 	"sync/atomic"
@@ -455,14 +456,93 @@ type subScope struct {
 	registry *statStore
 	name     string
 	tags     map[string]string
+	pairs    tagSet // WARN (CEV): rename
 }
 
 func (s *subScope) Scope(name string) Scope {
 	return s.ScopeWithTags(name, nil)
 }
 
+func newTagSet(tags map[string]string) tagSet {
+	if len(tags) == 0 {
+		return nil
+	}
+	a := make(tagSet, 0, len(tags))
+	for k, v := range tags {
+		a = append(a, tagPair{
+			dimension: k,
+			value:     replaceChars(v),
+		})
+	}
+	sort.Sort(a)
+	return a
+}
+
+// TODO (CEV): rename
+func (s *subScope) mergePairs(tags map[string]string) tagSet {
+	if len(tags) == 0 {
+		return s.pairs
+	}
+	if len(s.pairs) == 0 {
+		return newTagSet(tags)
+	}
+
+	all := make(tagSet, len(s.pairs)+len(tags))
+
+	// this is tricky, but we store the KV pairs for the tags
+	// argument at the end of the slice - this allows us to
+	// do this in one op.
+	sub := all[len(s.pairs):len(s.pairs)]
+
+	for k, v := range tags {
+		sub = append(sub, tagPair{
+			dimension: k,
+			value:     replaceChars(v),
+		})
+	}
+	sort.Sort(sub)
+
+	var i, j int
+	pairs := all[:0]
+	for i < len(sub) && j < len(s.pairs) {
+		if sub[i].dimension < s.pairs[j].dimension {
+			pairs = append(pairs, sub[i])
+			i++
+		} else {
+			if s.pairs[j].dimension != sub[i].dimension {
+				pairs = append(pairs, s.pairs[j])
+			}
+			j++
+		}
+	}
+	for ; i < len(sub); i++ {
+		pairs = append(pairs, sub[i])
+	}
+	for ; j < len(s.pairs); j++ {
+		pairs = append(pairs, s.pairs[j])
+	}
+
+	return pairs
+}
+
 func (s *subScope) ScopeWithTags(name string, tags map[string]string) Scope {
-	return &subScope{registry: s.registry, name: joinScopes(s.name, name), tags: s.mergeTags(tags)}
+	var pairs tagSet
+	if len(tags) != 0 {
+		pairs = make(tagSet, 0, len(tags))
+		for k, v := range tags {
+			pairs = append(pairs, tagPair{
+				dimension: k,
+				value:     replaceChars(v),
+			})
+		}
+		sort.Sort(pairs)
+	}
+	return &subScope{
+		registry: s.registry,
+		name:     joinScopes(s.name, name),
+		tags:     s.mergeTags(tags),
+		pairs:    pairs,
+	}
 }
 
 func (s *subScope) Store() Store {
@@ -475,6 +555,10 @@ func (s *subScope) NewCounter(name string) Counter {
 
 func (s *subScope) NewCounterWithTags(name string, tags map[string]string) Counter {
 	return s.registry.NewCounterWithTags(joinScopes(s.name, name), s.mergeTags(tags))
+}
+
+func (s *subScope) NewCounterWithTags_X(name string, tags map[string]string) Counter {
+	return s.registry.NewCounter(serializeTagSet(joinScopes(s.name, name), s.mergePairs(tags)))
 }
 
 func (s *subScope) NewPerInstanceCounter(name string, tags map[string]string) Counter {
