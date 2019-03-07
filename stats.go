@@ -358,7 +358,7 @@ func (s *statStore) Scope(name string) Scope {
 }
 
 func (s *statStore) ScopeWithTags(name string, tags map[string]string) Scope {
-	return subScope{registry: s, name: name, tags: tags}
+	return &subScope{registry: s, name: name, tags: tags}
 }
 
 func (s *statStore) NewCounter(name string) Counter {
@@ -457,51 +457,51 @@ type subScope struct {
 	tags     map[string]string
 }
 
-func (s subScope) Scope(name string) Scope {
+func (s *subScope) Scope(name string) Scope {
 	return s.ScopeWithTags(name, nil)
 }
 
-func (s subScope) ScopeWithTags(name string, tags map[string]string) Scope {
+func (s *subScope) ScopeWithTags(name string, tags map[string]string) Scope {
 	return &subScope{registry: s.registry, name: joinScopes(s.name, name), tags: s.mergeTags(tags)}
 }
 
-func (s subScope) Store() Store {
+func (s *subScope) Store() Store {
 	return s.registry
 }
 
-func (s subScope) NewCounter(name string) Counter {
+func (s *subScope) NewCounter(name string) Counter {
 	return s.NewCounterWithTags(name, nil)
 }
 
-func (s subScope) NewCounterWithTags(name string, tags map[string]string) Counter {
+func (s *subScope) NewCounterWithTags(name string, tags map[string]string) Counter {
 	return s.registry.NewCounterWithTags(joinScopes(s.name, name), s.mergeTags(tags))
 }
 
-func (s subScope) NewPerInstanceCounter(name string, tags map[string]string) Counter {
+func (s *subScope) NewPerInstanceCounter(name string, tags map[string]string) Counter {
 	return s.registry.NewPerInstanceCounter(joinScopes(s.name, name), s.mergeTags(tags))
 }
 
-func (s subScope) NewGauge(name string) Gauge {
+func (s *subScope) NewGauge(name string) Gauge {
 	return s.NewGaugeWithTags(name, nil)
 }
 
-func (s subScope) NewGaugeWithTags(name string, tags map[string]string) Gauge {
+func (s *subScope) NewGaugeWithTags(name string, tags map[string]string) Gauge {
 	return s.registry.NewGaugeWithTags(joinScopes(s.name, name), s.mergeTags(tags))
 }
 
-func (s subScope) NewPerInstanceGauge(name string, tags map[string]string) Gauge {
+func (s *subScope) NewPerInstanceGauge(name string, tags map[string]string) Gauge {
 	return s.registry.NewPerInstanceGauge(joinScopes(s.name, name), s.mergeTags(tags))
 }
 
-func (s subScope) NewTimer(name string) Timer {
+func (s *subScope) NewTimer(name string) Timer {
 	return s.NewTimerWithTags(name, nil)
 }
 
-func (s subScope) NewTimerWithTags(name string, tags map[string]string) Timer {
+func (s *subScope) NewTimerWithTags(name string, tags map[string]string) Timer {
 	return s.registry.NewTimerWithTags(joinScopes(s.name, name), s.mergeTags(tags))
 }
 
-func (s subScope) NewPerInstanceTimer(name string, tags map[string]string) Timer {
+func (s *subScope) NewPerInstanceTimer(name string, tags map[string]string) Timer {
 	return s.registry.NewPerInstanceTimer(joinScopes(s.name, name), s.mergeTags(tags))
 }
 
@@ -511,7 +511,7 @@ func joinScopes(parent, child string) string {
 
 // mergeTags augments tags with all scope-level tags that are not already present.
 // Modifies and returns tags directly.
-func (s subScope) mergeTags(tags map[string]string) map[string]string {
+func (s *subScope) mergeTags(tags map[string]string) map[string]string {
 	if len(s.tags) == 0 {
 		return tags
 	}
