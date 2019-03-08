@@ -111,52 +111,56 @@ func BenchmarkSerializeTags(b *testing.B) {
 	}
 }
 
-func BenchmarkSerializeTags_One(b *testing.B) {
+func benchmarkSerializeTags(b *testing.B, n int) {
 	const name = "prefix"
-	tags := map[string]string{
-		"tag1": "val1",
+	tags := make(map[string]string, n)
+	for i := 0; i < n; i++ {
+		k := fmt.Sprintf("key%d", i)
+		v := fmt.Sprintf("val%d", i)
+		tags[k] = v
 	}
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		serializeTags(name, tags)
 	}
+}
+
+func BenchmarkSerializeTags_One(b *testing.B) {
+	benchmarkSerializeTags(b, 1)
 }
 
 func BenchmarkSerializeTags_Two(b *testing.B) {
-	const name = "prefix"
-	tags := map[string]string{
-		"tag1": "val1",
-		"tag2": "val2",
-	}
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
-		serializeTags(name, tags)
-	}
+	benchmarkSerializeTags(b, 2)
 }
 
 func BenchmarkSerializeTags_Three(b *testing.B) {
-	const name = "prefix"
-	tags := map[string]string{
-		"tag1": "val1",
-		"tag2": "val2",
-		"tag3": "val3",
-	}
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
-		serializeTags(name, tags)
-	}
+	benchmarkSerializeTags(b, 3)
 }
 
 func BenchmarkSerializeTags_Four(b *testing.B) {
-	const name = "prefix"
-	tags := map[string]string{
-		"tag1": "val1",
-		"tag2": "val2",
-		"tag3": "val3",
-		"tag4": "val4",
-	}
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
-		serializeTags(name, tags)
-	}
+	benchmarkSerializeTags(b, 4)
+}
+
+func BenchmarkSerializeTags_Five(b *testing.B) {
+	benchmarkSerializeTags(b, 5)
+}
+
+func BenchmarkSerializeTags_Six(b *testing.B) {
+	benchmarkSerializeTags(b, 6)
+}
+
+func BenchmarkSerializeTags_Seven(b *testing.B) {
+	benchmarkSerializeTags(b, 7)
+}
+
+func BenchmarkSerializeTags_Eight(b *testing.B) {
+	benchmarkSerializeTags(b, 8)
+}
+
+func BenchmarkSerializeTags_Nine(b *testing.B) {
+	benchmarkSerializeTags(b, 9)
+}
+
+func BenchmarkSerializeTags_Ten(b *testing.B) {
+	benchmarkSerializeTags(b, 10)
 }
