@@ -96,21 +96,6 @@ func TestSerializeTagValuePeriod(t *testing.T) {
 	}
 }
 
-func BenchmarkSerializeTags(b *testing.B) {
-	const name = "prefix"
-	tags := map[string]string{
-		"tag1": "val1",
-		"tag2": "val2",
-		"tag3": "val3",
-		"tag4": "val4",
-		"tag5": "val5",
-	}
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
-		serializeTags(name, tags)
-	}
-}
-
 func benchmarkSerializeTags(b *testing.B, n int) {
 	const name = "prefix"
 	tags := make(map[string]string, n)
