@@ -110,42 +110,10 @@ func benchmarkSerializeTags(b *testing.B, n int) {
 	}
 }
 
-func BenchmarkSerializeTags_One(b *testing.B) {
-	benchmarkSerializeTags(b, 1)
-}
-
-func BenchmarkSerializeTags_Two(b *testing.B) {
-	benchmarkSerializeTags(b, 2)
-}
-
-func BenchmarkSerializeTags_Three(b *testing.B) {
-	benchmarkSerializeTags(b, 3)
-}
-
-func BenchmarkSerializeTags_Four(b *testing.B) {
-	benchmarkSerializeTags(b, 4)
-}
-
-func BenchmarkSerializeTags_Five(b *testing.B) {
-	benchmarkSerializeTags(b, 5)
-}
-
-func BenchmarkSerializeTags_Six(b *testing.B) {
-	benchmarkSerializeTags(b, 6)
-}
-
-func BenchmarkSerializeTags_Seven(b *testing.B) {
-	benchmarkSerializeTags(b, 7)
-}
-
-func BenchmarkSerializeTags_Eight(b *testing.B) {
-	benchmarkSerializeTags(b, 8)
-}
-
-func BenchmarkSerializeTags_Nine(b *testing.B) {
-	benchmarkSerializeTags(b, 9)
-}
-
-func BenchmarkSerializeTags_Ten(b *testing.B) {
-	benchmarkSerializeTags(b, 10)
+func BenchmarkSerializeTags(b *testing.B) {
+	for i := 1; i <= 10; i++ {
+		b.Run(fmt.Sprintf("%d", i), func(b *testing.B) {
+			benchmarkSerializeTags(b, i)
+		})
+	}
 }
