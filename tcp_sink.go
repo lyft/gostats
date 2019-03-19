@@ -257,16 +257,7 @@ func (b *buffer) WriteChar(c byte) {
 }
 
 func (b *buffer) WriteUnit64(val uint64) {
-	var buf [20]byte // big enough for 64bit value base 10
-	i := len(buf) - 1
-	for val >= 10 {
-		q := val / 10
-		buf[i] = byte('0' + val - q*10)
-		i--
-		val = q
-	}
-	buf[i] = byte('0' + val)
-	*b = append(*b, buf[i:]...)
+	*b = strconv.AppendUint(*b, val, 10)
 }
 
 func (b *buffer) WriteFloat64(val float64) {
