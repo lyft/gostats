@@ -122,7 +122,7 @@ func (s *tcpStatsdSink) flushUint64(name, suffix string, u uint64) {
 	}
 	s.mu.Unlock()
 
-	*b = (*b)[:0]
+	b.Reset()
 	pbFree.Put(b)
 }
 
@@ -140,7 +140,7 @@ func (s *tcpStatsdSink) flushFloat64(name, suffix string, f float64) {
 	}
 	s.mu.Unlock()
 
-	*b = (*b)[:0]
+	b.Reset()
 	pbFree.Put(b)
 }
 
@@ -236,6 +236,8 @@ var pbFree = sync.Pool{
 
 // Use a fast and simple buffer for constructing statsd messages
 type buffer []byte
+
+func (b *buffer) Reset() { *b = (*b)[:0] }
 
 func (b *buffer) Write(p []byte) {
 	*b = append(*b, p...)
