@@ -1,6 +1,7 @@
 package stats
 
 import (
+	"bufio"
 	"fmt"
 	"strings"
 	"sync"
@@ -351,5 +352,29 @@ func TestStatGenerator(t *testing.T) {
 	expected := "TestRuntime.counter:123|c\nTestRuntime.gauge:456|g\n"
 	if expected != sink.record {
 		t.Errorf("Expected: '%s' Got: '%s'", expected, sink.record)
+	}
+}
+
+type nopWriter struct{}
+
+func (nopWriter) Write(b []byte) (int, error) {
+	return len(b), nil
+}
+
+func BenchmarkFlushCounter(b *testing.B) {
+	sink := tcpStatsdSink{
+		bufWriter: bufio.NewWriter(nopWriter{}),
+	}
+	for i := 0; i < b.N; i++ {
+		sink.FlushCounter("TestCounter.___f=i.__tag1=v1", uint64(i))
+	}
+}
+
+func BenchmarkFlushTimer(b *testing.B) {
+	sink := tcpStatsdSink{
+		bufWriter: bufio.NewWriter(nopWriter{}),
+	}
+	for i := 0; i < b.N; i++ {
+		sink.FlushTimer("TestTImer.___f=i.__tag1=v1", float64(i)/3)
 	}
 }
