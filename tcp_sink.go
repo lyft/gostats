@@ -270,7 +270,5 @@ func (b *buffer) WriteUnit64(val uint64) {
 }
 
 func (b *buffer) WriteFloat64(val float64) {
-	// NOTE: fmt uses a precision of 6 by default, but we do
-	// not set the precision here since doing so is faster
-	*b = strconv.AppendFloat(*b, val, 'f', -1, 64)
+	*b = strconv.AppendFloat(*b, val, 'f', 6, 64)
 }
