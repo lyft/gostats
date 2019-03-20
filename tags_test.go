@@ -1,8 +1,37 @@
 package stats
 
 import (
+	"bufio"
+	"bytes"
+	crand "crypto/rand"
+	"encoding/base64"
+	"fmt"
+	"math/rand"
+	"sort"
 	"testing"
+	"time"
 )
+
+// Reference serializeTags implementation
+func serializeTagsReference(name string, tags map[string]string) string {
+	const prefix = ".__"
+	const sep = "="
+	if len(tags) == 0 {
+		return name
+	}
+	tagPairs := make([]tagPair, 0, len(tags))
+	for tagKey, tagValue := range tags {
+		tagValue = replaceChars(tagValue)
+		tagPairs = append(tagPairs, tagPair{tagKey, tagValue})
+	}
+	sort.Sort(tagSet(tagPairs))
+
+	buf := new(bytes.Buffer)
+	for _, tag := range tagPairs {
+		fmt.Fprint(buf, prefix, tag.dimension, sep, tag.value)
+	}
+	return name + buf.String()
+}
 
 func TestSerializeTags(t *testing.T) {
 	const name = "prefix"
@@ -12,6 +41,82 @@ func TestSerializeTags(t *testing.T) {
 	if serialized != expected {
 		t.Errorf("Serialized output (%s) didn't match expected output: %s",
 			serialized, expected)
+	}
+}
+
+// Test that the optimized serializeTags() function matches the reference
+// implementation.
+func TestSerializeTagsReference(t *testing.T) {
+	const name = "prefix"
+	makeTags := func(n int) map[string]string {
+		m := make(map[string]string, n)
+		for i := 0; i < n; i++ {
+			k := fmt.Sprintf("key%d", i)
+			v := fmt.Sprintf("val%d", i)
+			m[k] = v
+		}
+		return m
+	}
+	for i := 0; i < 100; i++ {
+		tags := makeTags(i)
+		expected := serializeTagsReference(name, tags)
+		serialized := serializeTags(name, tags)
+		if serialized != expected {
+			t.Errorf("%d Serialized output (%s) didn't match expected output: %s",
+				i, serialized, expected)
+		}
+	}
+}
+
+// Test the network sort used when we have 4 or less tags.  Since the iteration
+// order of maps is random we use random keys in an attempt to get 100% test
+// coverage.
+func TestSerializeTagsNetworkSort(t *testing.T) {
+	const name = "prefix"
+
+	rand.Seed(time.Now().UnixNano())
+	buf := bufio.NewReader(crand.Reader)
+	seen := make(map[string]bool)
+
+	randomString := func() string {
+		for i := 0; i < 100; i++ {
+			b := make([]byte, rand.Intn(30)+1)
+			if _, err := buf.Read(b); err != nil {
+				t.Fatal(err)
+			}
+			s := base64.StdEncoding.EncodeToString(b)
+			if !seen[s] {
+				seen[s] = true
+				return s
+			}
+		}
+		t.Fatal("Failed to generate a random string")
+		return ""
+	}
+
+	makeTags := func(n int) map[string]string {
+		m := make(map[string]string, n)
+		for i := 0; i < n; i++ {
+			k := randomString()
+			v := randomString()
+			m[k] = v
+		}
+		return m
+	}
+
+	// we use a network sort when tag length is 4 or less, but test up to 8
+	// here in case that value is ever increased.
+	for i := 1; i <= 4; i++ {
+		// loop to increase the odds of 100% test coverage
+		for i := 0; i < 10; i++ {
+			tags := makeTags(i)
+			expected := serializeTagsReference(name, tags)
+			serialized := serializeTags(name, tags)
+			if serialized != expected {
+				t.Errorf("%d Serialized output (%s) didn't match expected output: %s",
+					i, serialized, expected)
+			}
+		}
 	}
 }
 
@@ -48,40 +153,24 @@ func TestSerializeTagValuePeriod(t *testing.T) {
 	}
 }
 
+func benchmarkSerializeTags(b *testing.B, n int) {
+	const name = "prefix"
+	tags := make(map[string]string, n)
+	for i := 0; i < n; i++ {
+		k := fmt.Sprintf("key%d", i)
+		v := fmt.Sprintf("val%d", i)
+		tags[k] = v
+	}
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		serializeTags(name, tags)
+	}
+}
+
 func BenchmarkSerializeTags(b *testing.B) {
-	const name = "prefix"
-	tags := map[string]string{
-		"tag1": "val1",
-		"tag2": "val2",
-		"tag3": "val3",
-		"tag4": "val4",
-		"tag5": "val5",
-	}
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
-		serializeTags(name, tags)
-	}
-}
-
-func BenchmarkSerializeTags_One(b *testing.B) {
-	const name = "prefix"
-	tags := map[string]string{
-		"tag1": "val1",
-	}
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
-		serializeTags(name, tags)
-	}
-}
-
-func BenchmarkSerializeTags_Two(b *testing.B) {
-	const name = "prefix"
-	tags := map[string]string{
-		"tag1": "val1",
-		"tag2": "val2",
-	}
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
-		serializeTags(name, tags)
+	for i := 1; i <= 10; i++ {
+		b.Run(fmt.Sprintf("%d", i), func(b *testing.B) {
+			benchmarkSerializeTags(b, i)
+		})
 	}
 }
