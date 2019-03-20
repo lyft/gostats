@@ -98,7 +98,15 @@ func serializeTags(name string, tags map[string]string) string {
 				value:     replaceChars(v),
 			})
 		}
-		sort.Sort(pairs)
+
+		// Using sort.Sort allocates due to Go's interface{} implementation
+		// and uses an insertion sort for 12 or less items.  Using our own
+		// insertion sort saves an allocation and is roughly ~17% faster.
+		if len(pairs) <= 12 {
+			insertionSort(pairs)
+		} else {
+			sort.Sort(pairs)
+		}
 
 		// CEV: this is same as strings.Builder, but works with go1.9 and earlier
 		b := make([]byte, 0, n)
@@ -110,6 +118,14 @@ func serializeTags(name string, tags map[string]string) string {
 			b = append(b, tag.value...)
 		}
 		return *(*string)(unsafe.Pointer(&b))
+	}
+}
+
+func insertionSort(data tagSet) {
+	for i := 1; i < len(data); i++ {
+		for j := i; j > 0 && data[j].dimension < data[j-1].dimension; j-- {
+			data[j], data[j-1] = data[j-1], data[j]
+		}
 	}
 }
 
