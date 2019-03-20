@@ -4,7 +4,9 @@ import (
 	"bufio"
 	"bytes"
 	"fmt"
+	"math"
 	"net"
+	"strconv"
 	"sync"
 	"time"
 
@@ -91,15 +93,6 @@ func (s *tcpStatsdSink) flush() error {
 	return nil
 }
 
-func (s *tcpStatsdSink) flushString(f string, args ...interface{}) {
-	s.mu.Lock()
-	_, err := fmt.Fprintf(s.bufWriter, f, args...)
-	if err != nil {
-		s.handleFlushError(err, s.bufWriter.Buffered())
-	}
-	s.mu.Unlock()
-}
-
 // s.mu should be held
 func (s *tcpStatsdSink) handleFlushError(err error, droppedBytes int) {
 	d := uint64(droppedBytes)
@@ -115,16 +108,61 @@ func (s *tcpStatsdSink) handleFlushError(err error, droppedBytes int) {
 	})
 }
 
+func (s *tcpStatsdSink) flushUint64(name, suffix string, u uint64) {
+	b := pbFree.Get().(*buffer)
+
+	b.WriteString(name)
+	b.WriteChar(':')
+	b.WriteUnit64(u)
+	b.WriteString(suffix)
+
+	s.mu.Lock()
+	if _, err := s.bufWriter.Write(*b); err != nil {
+		s.handleFlushError(err, s.bufWriter.Buffered())
+	}
+	s.mu.Unlock()
+
+	b.Reset()
+	pbFree.Put(b)
+}
+
+func (s *tcpStatsdSink) flushFloat64(name, suffix string, f float64) {
+	b := pbFree.Get().(*buffer)
+
+	b.WriteString(name)
+	b.WriteChar(':')
+	b.WriteFloat64(f)
+	b.WriteString(suffix)
+
+	s.mu.Lock()
+	if _, err := s.bufWriter.Write(*b); err != nil {
+		s.handleFlushError(err, s.bufWriter.Buffered())
+	}
+	s.mu.Unlock()
+
+	b.Reset()
+	pbFree.Put(b)
+}
+
 func (s *tcpStatsdSink) FlushCounter(name string, value uint64) {
-	s.flushString("%s:%d|c\n", name, value)
+	s.flushUint64(name, "|c\n", value)
 }
 
 func (s *tcpStatsdSink) FlushGauge(name string, value uint64) {
-	s.flushString("%s:%d|g\n", name, value)
+	s.flushUint64(name, "|g\n", value)
 }
 
 func (s *tcpStatsdSink) FlushTimer(name string, value float64) {
-	s.flushString("%s:%f|ms\n", name, value)
+	// Since we mistakenly use floating point values to represent time
+	// durations this method is often passed an integer encoded as a
+	// float. Formatting integers is much faster (>2x) than formatting
+	// floats so use integer formatting whenever possible.
+	//
+	if 0 <= value && value < math.MaxUint64 && math.Trunc(value) == value {
+		s.flushUint64(name, "|ms\n", uint64(value))
+	} else {
+		s.flushFloat64(name, "|ms\n", value)
+	}
 }
 
 func (s *tcpStatsdSink) run() {
@@ -186,4 +224,42 @@ func getBuffer() *bytes.Buffer {
 
 func putBuffer(b *bytes.Buffer) {
 	bufferPool.Put(b)
+}
+
+// pbFree is the print buffer pool
+var pbFree = sync.Pool{
+	New: func() interface{} {
+		b := make(buffer, 0, 128)
+		return &b
+	},
+}
+
+// Use a fast and simple buffer for constructing statsd messages
+type buffer []byte
+
+func (b *buffer) Reset() { *b = (*b)[:0] }
+
+func (b *buffer) Write(p []byte) {
+	*b = append(*b, p...)
+}
+
+func (b *buffer) WriteString(s string) {
+	*b = append(*b, s...)
+}
+
+// This is named WriteChar instead of WriteByte because the 'stdmethods' check
+// of 'go vet' wants WriteByte to have the signature:
+//
+// 	func (b *buffer) WriteByte(c byte) error { ... }
+//
+func (b *buffer) WriteChar(c byte) {
+	*b = append(*b, c)
+}
+
+func (b *buffer) WriteUnit64(val uint64) {
+	*b = strconv.AppendUint(*b, val, 10)
+}
+
+func (b *buffer) WriteFloat64(val float64) {
+	*b = strconv.AppendFloat(*b, val, 'f', 6, 64)
 }
