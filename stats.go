@@ -152,7 +152,7 @@ type Timer interface {
 // They measure time from the time they are allocated by a Timer with
 //   AllocateSpan()
 // until they call
-//   Complete()
+//   Complete() or CompleteAsMS()
 // or
 //   CompleteWithDuration(time.Duration)
 // When either function is called the timespan is flushed.
@@ -163,6 +163,9 @@ type Timer interface {
 type Timespan interface {
 	// End the Timespan and flush it.
 	Complete() time.Duration
+
+	// End the Timespan, recording the elapsed time as ms and flush it.
+	CompleteAsMS() time.Duration
 
 	// End the Timespan and flush it. Adds additional time.Duration to the measured time
 	CompleteWithDuration(time.Duration)
@@ -285,9 +288,17 @@ type timespan struct {
 	start time.Time
 }
 
+// Complete records the elapsed time in nanos, and returns the elapsed duration.
 func (ts *timespan) Complete() time.Duration {
 	d := time.Now().Sub(ts.start)
 	ts.timer.time(d)
+	return d
+}
+
+// CompleteAsMS records the elapsed time in ms, and returns the elapsed duration.
+func (ts *timespan) CompleteAsMS() time.Duration {
+	d := time.Now().Sub(ts.start)
+	ts.timer.time(d / time.Millisecond)
 	return d
 }
 
