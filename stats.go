@@ -1,7 +1,6 @@
 package stats
 
 import (
-	"expvar"
 	"strconv"
 	"sync"
 	"sync/atomic"
@@ -178,11 +177,9 @@ type StatGenerator interface {
 }
 
 // NewStore returns an Empty store that flushes to Sink passed as an argument.
-func NewStore(sink Sink, export bool) Store {
-	return &statStore{
-		sink:   sink,
-		export: export,
-	}
+// Note: the export argument is unused.
+func NewStore(sink Sink, _ bool) Store {
+	return &statStore{sink: sink}
 }
 
 // NewDefaultStore returns a Store with a TCP statsd sink, and a running flush timer.
@@ -194,7 +191,7 @@ func NewDefaultStore() Store {
 		newStore = NewStore(NewLoggingSink(), false)
 		go newStore.Start(time.NewTicker(10 * time.Second))
 	} else {
-		newStore = NewStore(NewTCPStatsdSink(), true)
+		newStore = NewStore(NewTCPStatsdSink(), false)
 		go newStore.Start(time.NewTicker(time.Duration(settings.FlushIntervalS) * time.Second))
 	}
 	return newStore
@@ -303,8 +300,7 @@ type statStore struct {
 	genMtx         sync.RWMutex
 	statGenerators []StatGenerator
 
-	sink   Sink
-	export bool
+	sink Sink
 }
 
 func (s *statStore) Flush() {
@@ -373,8 +369,6 @@ func (s *statStore) NewCounterWithTags(name string, tags map[string]string) Coun
 	c := new(counter)
 	if v, loaded := s.counters.LoadOrStore(name, c); loaded {
 		c = v.(*counter)
-	} else if s.export {
-		publishExpVar(name, c)
 	}
 	return c
 }
@@ -405,8 +399,6 @@ func (s *statStore) NewGaugeWithTags(name string, tags map[string]string) Gauge 
 	g := new(gauge)
 	if v, loaded := s.gauges.LoadOrStore(name, g); loaded {
 		g = v.(*gauge)
-	} else if s.export {
-		publishExpVar(name, g)
 	}
 	return g
 }
@@ -524,9 +516,4 @@ func (s subScope) mergeTags(tags map[string]string) map[string]string {
 		}
 	}
 	return tags
-}
-
-func publishExpVar(name string, v expvar.Var) {
-	defer func() { recover() }()
-	expvar.Publish(name, v)
 }
