@@ -16,9 +16,31 @@ func (t tagSet) Len() int           { return len(t) }
 func (t tagSet) Swap(i, j int)      { t[i], t[j] = t[j], t[i] }
 func (t tagSet) Less(i, j int) bool { return t[i].dimension < t[j].dimension }
 
+func fixTags(tags map[string]string) map[string]string {
+	no_empty := true
+	for _, v := range tags {
+		if v == "" {
+			no_empty = false
+			break
+		}
+	}
+	if no_empty {
+		return tags
+	}
+	new_tags := make(map[string]string)
+	for k, v := range tags {
+		if v != "" {
+			new_tags[k] = v
+		}
+	}
+	return new_tags
+}
+
 func serializeTags(name string, tags map[string]string) string {
 	const prefix = ".__"
 	const sep = "="
+
+	tags = fixTags(tags)
 
 	switch len(tags) {
 	case 0:
