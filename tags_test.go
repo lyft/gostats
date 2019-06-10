@@ -153,10 +153,10 @@ func TestSerializeTagValuePeriod(t *testing.T) {
 	}
 }
 
-func TestSerializeTagDiscardEmptyTagValue(t *testing.T) {
+func TestSerializeTagDiscardEmptyTagKeyValue(t *testing.T) {
 	const name = "prefix"
 	const expected = name + ".__key1=value1.__key3=value3"
-	tags := map[string]string{"key1": "value1", "key2": "", "key3": "value3"}
+	tags := map[string]string{"key1": "value1", "key2": "", "key3": "value3", "": "value4"}
 	serialized := serializeTags(name, tags)
 	if serialized != expected {
 		t.Errorf("Serialized output (%s) didn't match expected output: %s",

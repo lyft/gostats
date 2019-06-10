@@ -18,8 +18,8 @@ func (t tagSet) Less(i, j int) bool { return t[i].dimension < t[j].dimension }
 
 func fixTags(tags map[string]string) map[string]string {
 	noEmpty := true
-	for _, v := range tags {
-		if v == "" {
+	for k, v := range tags {
+		if k == "" || v == "" {
 			noEmpty = false
 			break
 		}
@@ -27,9 +27,9 @@ func fixTags(tags map[string]string) map[string]string {
 	if noEmpty {
 		return tags
 	}
-	newTags := make(map[string]string)
+	newTags := make(map[string]string, len(tags) - 1)
 	for k, v := range tags {
-		if v != "" {
+		if k != "" && v != "" {
 			newTags[k] = v
 		}
 	}
