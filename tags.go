@@ -27,7 +27,7 @@ func fixTags(tags map[string]string) map[string]string {
 	if noEmpty {
 		return tags
 	}
-	newTags := make(map[string]string, len(tags) - 1)
+	newTags := make(map[string]string, len(tags)-1)
 	for k, v := range tags {
 		if k != "" && v != "" {
 			newTags[k] = v
