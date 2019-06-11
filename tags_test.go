@@ -28,7 +28,9 @@ func serializeTagsReference(name string, tags map[string]string) string {
 
 	buf := new(bytes.Buffer)
 	for _, tag := range tagPairs {
-		fmt.Fprint(buf, prefix, tag.dimension, sep, tag.value)
+		if tag.dimension != "" && tag.value != "" {
+			fmt.Fprint(buf, prefix, tag.dimension, sep, tag.value)
+		}
 	}
 	return name + buf.String()
 }
@@ -146,6 +148,17 @@ func TestSerializeTagValuePeriod(t *testing.T) {
 	const name = "prefix"
 	const expected = name + ".__foo=blah_blah.__q=p"
 	tags := map[string]string{"foo": "blah.blah", "q": "p"}
+	serialized := serializeTags(name, tags)
+	if serialized != expected {
+		t.Errorf("Serialized output (%s) didn't match expected output: %s",
+			serialized, expected)
+	}
+}
+
+func TestSerializeTagDiscardEmptyTagKeyValue(t *testing.T) {
+	const name = "prefix"
+	const expected = name + ".__key1=value1.__key3=value3"
+	tags := map[string]string{"key1": "value1", "key2": "", "key3": "value3", "": "value4"}
 	serialized := serializeTags(name, tags)
 	if serialized != expected {
 		t.Errorf("Serialized output (%s) didn't match expected output: %s",
