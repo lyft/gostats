@@ -16,19 +16,16 @@ func (t tagSet) Len() int           { return len(t) }
 func (t tagSet) Swap(i, j int)      { t[i], t[j] = t[j], t[i] }
 func (t tagSet) Less(i, j int) bool { return t[i].dimension < t[j].dimension }
 
-func discardEmptyTags(tags map[string]string) {
-	for k, v := range tags {
-		if k == "" || v == "" {
-			delete(tags, k)
-		}
-	}
-}
-
 func serializeTags(name string, tags map[string]string) string {
 	const prefix = ".__"
 	const sep = "="
 
-	discardEmptyTags(tags)
+    // discard pairs where the tag or value is an empty string
+	for k, v := range tags {
+        if k == "" || v == "" {
+            delete(tags, k)
+        }
+    }
 
 	switch len(tags) {
 	case 0:
