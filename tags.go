@@ -20,12 +20,12 @@ func serializeTags(name string, tags map[string]string) string {
 	const prefix = ".__"
 	const sep = "="
 
-    // discard pairs where the tag or value is an empty string
+	// discard pairs where the tag or value is an empty string
 	for k, v := range tags {
-        if k == "" || v == "" {
-            delete(tags, k)
-        }
-    }
+		if k == "" || v == "" {
+			delete(tags, k)
+		}
+	}
 
 	switch len(tags) {
 	case 0:
