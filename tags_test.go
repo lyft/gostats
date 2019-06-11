@@ -28,7 +28,9 @@ func serializeTagsReference(name string, tags map[string]string) string {
 
 	buf := new(bytes.Buffer)
 	for _, tag := range tagPairs {
-		fmt.Fprint(buf, prefix, tag.dimension, sep, tag.value)
+		if tag.dimension != "" && tag.value != "" {
+			fmt.Fprint(buf, prefix, tag.dimension, sep, tag.value)
+		}
 	}
 	return name + buf.String()
 }
