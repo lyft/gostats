@@ -13,6 +13,8 @@ type Settings struct {
 	StatsdPort int `envconfig:"STATSD_PORT" default:"8125"`
 	// Flushing interval.
 	FlushIntervalS int `envconfig:"GOSTATS_FLUSH_INTERVAL_SECONDS" default:"5"`
+	// Use logging sink when statsd is not available (instead of a noop sink).
+	UseLoggingSink bool `envconfig:"USE_LOGGING_SINK_WITHOUT_STATSD" default:"true"`
 }
 
 // GetSettings returns the Settings gostats will run with.
