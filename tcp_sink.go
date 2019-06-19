@@ -20,6 +20,7 @@ import (
 
 const (
 	flushInterval           = time.Second
+	writeTimeout            = flushInterval
 	logOnEveryNDroppedBytes = 1 << 15 // Log once per 32kb of dropped stats
 	defaultBufferSize       = 1 << 16
 	approxMaxMemBytes       = 1 << 22
@@ -191,7 +192,11 @@ func (s *tcpStatsdSink) run() {
 				return
 			}
 			lenbuf := len(buf.Bytes())
+
+			s.conn.SetWriteDeadline(time.Now().Add(writeTimeout))
 			_, err := buf.WriteTo(s.conn)
+			s.conn.SetWriteDeadline(time.Time{}) // clear deadline
+
 			if len(s.outc) == 0 {
 				// We've at least tried to write all the data we have. Wake up anyone waiting on flush.
 				s.mu.Lock()
