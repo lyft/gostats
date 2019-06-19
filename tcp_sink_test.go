@@ -3,9 +3,14 @@ package stats
 import (
 	"bufio"
 	"fmt"
+	"io"
+	"io/ioutil"
+	"net"
+	"os"
 	"strings"
 	"sync"
 	"testing"
+	"time"
 )
 
 type testStatSink struct {
@@ -352,6 +357,58 @@ func TestStatGenerator(t *testing.T) {
 	expected := "TestRuntime.counter:123|c\nTestRuntime.gauge:456|g\n"
 	if expected != sink.record {
 		t.Errorf("Expected: '%s' Got: '%s'", expected, sink.record)
+	}
+}
+
+func TestFlush(t *testing.T) {
+	lc, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer lc.Close()
+
+	_, port, err := net.SplitHostPort(lc.Addr().String())
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	oldStatsdPort := os.Getenv("STATSD_PORT")
+	os.Setenv("STATSD_PORT", port)
+	defer func() {
+		if oldStatsdPort == "" {
+			os.Unsetenv("STATSD_PORT")
+		} else {
+			os.Setenv("STATSD_PORT", oldStatsdPort)
+		}
+	}()
+
+	go func() {
+		for {
+			conn, err := lc.Accept()
+			if conn != nil {
+				io.Copy(ioutil.Discard, conn)
+			}
+			if err != nil {
+				t.Logf("Reader: %s", err)
+				fmt.Println("Reader:", err) // WARN
+				return
+			}
+		}
+	}()
+
+	sink := NewTCPStatsdSink()
+	flushed := make(chan struct{})
+	timeout := time.After(time.Second * 5)
+
+	go func() {
+		defer close(flushed)
+		sink.Flush()
+	}()
+	select {
+	case <-flushed:
+		// ok
+	case <-timeout:
+		t.Fatal("Flush blocked")
 	}
 }
 
