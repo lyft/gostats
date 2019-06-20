@@ -34,8 +34,11 @@ func NewTCPStatsdSink() FlushableSink {
 		outc: outc,
 	}
 	s := &tcpStatsdSink{
-		outc:      outc,
-		bufWriter: bufio.NewWriterSize(&writer, defaultBufferSize), // TODO(btc): parameterize size
+		outc: outc,
+		// TODO(btc): parameterize size
+		bufWriter: bufio.NewWriterSize(&writer, defaultBufferSize),
+		// arbitrarily buffered
+		doFlush: make(chan struct{}, 8),
 	}
 	s.flushCond = sync.NewCond(&s.mu)
 	go s.run()
@@ -43,14 +46,13 @@ func NewTCPStatsdSink() FlushableSink {
 }
 
 type tcpStatsdSink struct {
-	conn net.Conn
-	outc chan *bytes.Buffer
-
-	mu            sync.Mutex
-	droppedBytes  uint64
-	bufWriter     *bufio.Writer
-	flushCond     *sync.Cond
-	lastFlushTime time.Time
+	conn         net.Conn
+	outc         chan *bytes.Buffer
+	mu           sync.Mutex
+	bufWriter    *bufio.Writer
+	flushCond    *sync.Cond
+	doFlush      chan struct{}
+	droppedBytes uint64
 }
 
 type sinkWriter struct {
@@ -70,13 +72,13 @@ func (w *sinkWriter) Write(p []byte) (int, error) {
 }
 
 func (s *tcpStatsdSink) Flush() {
-	now := time.Now()
-	if err := s.flush(); err != nil {
-		// Not much we can do here; we don't know how/why we failed.
-		return
+	if s.flush() != nil {
+		return // nothing we can do
 	}
+
+	s.doFlush <- struct{}{}
 	s.mu.Lock()
-	for len(s.outc) != 0 && now.After(s.lastFlushTime) {
+	for len(s.outc) != 0 {
 		s.flushCond.Wait()
 	}
 	s.mu.Unlock()
@@ -84,13 +86,12 @@ func (s *tcpStatsdSink) Flush() {
 
 func (s *tcpStatsdSink) flush() error {
 	s.mu.Lock()
-	defer s.mu.Unlock()
 	err := s.bufWriter.Flush()
 	if err != nil {
 		s.handleFlushError(err, s.bufWriter.Buffered())
-		return err
 	}
-	return nil
+	s.mu.Unlock()
+	return err
 }
 
 // s.mu should be held
@@ -184,25 +185,41 @@ func (s *tcpStatsdSink) run() {
 		select {
 		case <-t.C:
 			s.flush()
+		case <-s.doFlush:
+			// Only flush pending buffers, this prevents an issue where
+			// continuous writes prevent the flush loop from exiting.
+			//
+			// If there is an error writeBuffer() will set the conn to
+			// nil thus breaking the loop.
+			//
+			n := len(s.outc)
+			for i := 0; i < n && s.conn != nil; i++ {
+				buf := <-s.outc
+				s.writeBuffer(buf)
+				putBuffer(buf)
+			}
+			// Signal every blocked Flush() call. We don't handle multiple
+			// pending Flush() calls independently as we cannot allow this
+			// to block.  This is best effort only.
+			//
+			s.flushCond.Broadcast()
 		case buf := <-s.outc:
-			lenbuf := buf.Len()
-			_, err := buf.WriteTo(s.conn)
-			if len(s.outc) == 0 {
-				// We've at least tried to write all the data we have. Wake up anyone waiting on flush.
-				s.mu.Lock()
-				s.lastFlushTime = time.Now()
-				s.mu.Unlock()
-				s.flushCond.Broadcast()
-			}
-			if err != nil {
-				s.mu.Lock()
-				s.handleFlushError(err, lenbuf)
-				s.mu.Unlock()
-				_ = s.conn.Close() // Ignore close failures
-				s.conn = nil
-			}
+			s.writeBuffer(buf)
 			putBuffer(buf)
 		}
+	}
+}
+
+// writeBuffer writes the buffer to the underlying conn.  May only be called
+// from run().
+func (s *tcpStatsdSink) writeBuffer(buf *bytes.Buffer) {
+	len := buf.Len()
+	if _, err := buf.WriteTo(s.conn); err != nil {
+		s.mu.Lock()
+		s.handleFlushError(err, len)
+		s.mu.Unlock()
+		_ = s.conn.Close()
+		s.conn = nil // this will break the loop
 	}
 }
 
