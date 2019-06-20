@@ -360,7 +360,7 @@ func TestStatGenerator(t *testing.T) {
 	}
 }
 
-func TestFlush(t *testing.T) {
+func TestTCPStatsdSink_Flush(t *testing.T) {
 	lc, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatal(err)
@@ -372,44 +372,84 @@ func TestFlush(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	oldStatsdPort := os.Getenv("STATSD_PORT")
+	oldPort, exists := os.LookupEnv("STATSD_PORT")
+	if exists {
+		defer os.Setenv("STATSD_PORT", oldPort)
+	} else {
+		defer os.Unsetenv("STATSD_PORT")
+	}
 	os.Setenv("STATSD_PORT", port)
-	defer func() {
-		if oldStatsdPort == "" {
-			os.Unsetenv("STATSD_PORT")
-		} else {
-			os.Setenv("STATSD_PORT", oldStatsdPort)
-		}
-	}()
 
 	go func() {
 		for {
 			conn, err := lc.Accept()
 			if conn != nil {
-				io.Copy(ioutil.Discard, conn)
+				_, _ = io.Copy(ioutil.Discard, conn)
 			}
 			if err != nil {
-				t.Logf("Reader: %s", err)
-				fmt.Println("Reader:", err) // WARN
 				return
 			}
 		}
 	}()
 
 	sink := NewTCPStatsdSink()
-	flushed := make(chan struct{})
-	timeout := time.After(time.Second * 5)
 
-	go func() {
-		defer close(flushed)
-		sink.Flush()
-	}()
-	select {
-	case <-flushed:
-		// ok
-	case <-timeout:
-		t.Fatal("Flush blocked")
-	}
+	t.Run("One", func(t *testing.T) {
+		flushed := make(chan struct{})
+		go func() {
+			defer close(flushed)
+			sink.Flush()
+		}()
+		select {
+		case <-flushed:
+			// ok
+		case <-time.After(time.Second):
+			t.Fatal("Flush blocked")
+		}
+	})
+
+	t.Run("Ten", func(t *testing.T) {
+		flushed := make(chan struct{})
+		go func() {
+			defer close(flushed)
+			for i := 0; i < 10; i++ {
+				sink.Flush()
+			}
+		}()
+		select {
+		case <-flushed:
+			// ok
+		case <-time.After(time.Second):
+			t.Fatal("Flush blocked")
+		}
+	})
+
+	t.Run("Parallel", func(t *testing.T) {
+		start := make(chan struct{})
+		wg := new(sync.WaitGroup)
+		for i := 0; i < 20; i++ {
+			wg.Add(1)
+			go func() {
+				<-start
+				defer wg.Done()
+				for i := 0; i < 10; i++ {
+					sink.Flush()
+				}
+			}()
+		}
+		flushed := make(chan struct{})
+		go func() {
+			close(start)
+			wg.Wait()
+			close(flushed)
+		}()
+		select {
+		case <-flushed:
+			// ok
+		case <-time.After(time.Second):
+			t.Fatal("Flush blocked")
+		}
+	})
 }
 
 type nopWriter struct{}
