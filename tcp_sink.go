@@ -76,7 +76,7 @@ func (s *tcpStatsdSink) Flush() {
 		return
 	}
 	s.mu.Lock()
-	for now.After(s.lastFlushTime) {
+	for len(s.outc) != 0 && now.After(s.lastFlushTime) {
 		s.flushCond.Wait()
 	}
 	s.mu.Unlock()
