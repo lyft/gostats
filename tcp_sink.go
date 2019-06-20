@@ -19,6 +19,10 @@ import (
 // e.g. `func NewTCPStatsdSinkWithOptions(opts ...Option) Sink`
 
 const (
+	defaultRetryInterval = time.Second * 3
+	defaultDialTimeout   = defaultRetryInterval / 2
+	defaultWriteTimeout  = time.Second
+
 	flushInterval           = time.Second
 	logOnEveryNDroppedBytes = 1 << 15 // Log once per 32kb of dropped stats
 	defaultBufferSize       = 1 << 16
@@ -167,19 +171,20 @@ func (s *tcpStatsdSink) FlushTimer(name string, value float64) {
 }
 
 func (s *tcpStatsdSink) run() {
-	settings := GetSettings()
+	conf := GetSettings()
+	addr := net.JoinHostPort(conf.StatsdHost, strconv.Itoa(conf.StatsdPort))
+
 	t := time.NewTicker(flushInterval)
 	defer t.Stop()
 	for {
 		if s.conn == nil {
-			conn, err := net.Dial("tcp", fmt.Sprintf("%s:%d", settings.StatsdHost,
-				settings.StatsdPort))
-			if err != nil {
+			if err := s.connect(addr); err != nil {
 				logger.Warnf("statsd connection error: %s", err)
+
+				// TODO (CEV): don't sleep on the first retry
 				time.Sleep(3 * time.Second)
 				continue
 			}
-			s.conn = conn
 		}
 
 		select {
@@ -214,13 +219,28 @@ func (s *tcpStatsdSink) run() {
 // from run().
 func (s *tcpStatsdSink) writeBuffer(buf *bytes.Buffer) {
 	len := buf.Len()
-	if _, err := buf.WriteTo(s.conn); err != nil {
+
+	// TODO (CEV): parameterize timeout
+	s.conn.SetWriteDeadline(time.Now().Add(defaultWriteTimeout))
+	_, err := buf.WriteTo(s.conn)
+	s.conn.SetWriteDeadline(time.Time{}) // clear
+
+	if err != nil {
 		s.mu.Lock()
 		s.handleFlushError(err, len)
 		s.mu.Unlock()
 		_ = s.conn.Close()
 		s.conn = nil // this will break the loop
 	}
+}
+
+func (s *tcpStatsdSink) connect(address string) error {
+	// TODO (CEV): parameterize timeout
+	conn, err := net.DialTimeout("tcp", address, defaultDialTimeout)
+	if err == nil {
+		s.conn = conn
+	}
+	return err
 }
 
 var bufferPool sync.Pool
