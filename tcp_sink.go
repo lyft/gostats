@@ -92,15 +92,15 @@ func (s *tcpStatsdSink) flush() error {
 	s.mu.Lock()
 	err := s.bufWriter.Flush()
 	if err != nil {
-		s.handleFlushError(err, s.bufWriter.Buffered())
+		s.handleFlushError(err)
 	}
 	s.mu.Unlock()
 	return err
 }
 
 // s.mu should be held
-func (s *tcpStatsdSink) handleFlushError(err error, droppedBytes int) {
-	d := uint64(droppedBytes)
+func (s *tcpStatsdSink) handleFlushErrorSize(err error, dropped int) {
+	d := uint64(dropped)
 	if (s.droppedBytes+d)%logOnEveryNDroppedBytes > s.droppedBytes%logOnEveryNDroppedBytes {
 		logger.WithField("total_dropped_bytes", s.droppedBytes+d).
 			WithField("dropped_bytes", d).
@@ -113,6 +113,26 @@ func (s *tcpStatsdSink) handleFlushError(err error, droppedBytes int) {
 	})
 }
 
+// s.mu should be held
+func (s *tcpStatsdSink) handleFlushError(err error) {
+	s.handleFlushErrorSize(err, s.bufWriter.Buffered())
+}
+
+func (s *tcpStatsdSink) writeBuffer(b *buffer) {
+	s.mu.Lock()
+	if s.bufWriter.Available() < b.Len() {
+		if err := s.bufWriter.Flush(); err != nil {
+			s.handleFlushError(err)
+		}
+		// If there is an error we reset the bufWriter so its
+		// okay to attempt the write after the failed flush.
+	}
+	if _, err := s.bufWriter.Write(*b); err != nil {
+		s.handleFlushError(err)
+	}
+	s.mu.Unlock()
+}
+
 func (s *tcpStatsdSink) flushUint64(name, suffix string, u uint64) {
 	b := pbFree.Get().(*buffer)
 
@@ -121,11 +141,7 @@ func (s *tcpStatsdSink) flushUint64(name, suffix string, u uint64) {
 	b.WriteUnit64(u)
 	b.WriteString(suffix)
 
-	s.mu.Lock()
-	if _, err := s.bufWriter.Write(*b); err != nil {
-		s.handleFlushError(err, s.bufWriter.Buffered())
-	}
-	s.mu.Unlock()
+	s.writeBuffer(b)
 
 	b.Reset()
 	pbFree.Put(b)
@@ -139,11 +155,7 @@ func (s *tcpStatsdSink) flushFloat64(name, suffix string, f float64) {
 	b.WriteFloat64(f)
 	b.WriteString(suffix)
 
-	s.mu.Lock()
-	if _, err := s.bufWriter.Write(*b); err != nil {
-		s.handleFlushError(err, s.bufWriter.Buffered())
-	}
-	s.mu.Unlock()
+	s.writeBuffer(b)
 
 	b.Reset()
 	pbFree.Put(b)
@@ -194,13 +206,13 @@ func (s *tcpStatsdSink) run() {
 			// Only flush pending buffers, this prevents an issue where
 			// continuous writes prevent the flush loop from exiting.
 			//
-			// If there is an error writeBuffer() will set the conn to
+			// If there is an error writeToConn() will set the conn to
 			// nil thus breaking the loop.
 			//
 			n := len(s.outc)
 			for i := 0; i < n && s.conn != nil; i++ {
 				buf := <-s.outc
-				s.writeBuffer(buf)
+				s.writeToConn(buf)
 				putBuffer(buf)
 			}
 			// Signal every blocked Flush() call. We don't handle multiple
@@ -209,15 +221,15 @@ func (s *tcpStatsdSink) run() {
 			//
 			s.flushCond.Broadcast()
 		case buf := <-s.outc:
-			s.writeBuffer(buf)
+			s.writeToConn(buf)
 			putBuffer(buf)
 		}
 	}
 }
 
-// writeBuffer writes the buffer to the underlying conn.  May only be called
+// writeToConn writes the buffer to the underlying conn.  May only be called
 // from run().
-func (s *tcpStatsdSink) writeBuffer(buf *bytes.Buffer) {
+func (s *tcpStatsdSink) writeToConn(buf *bytes.Buffer) {
 	len := buf.Len()
 
 	// TODO (CEV): parameterize timeout
@@ -227,7 +239,7 @@ func (s *tcpStatsdSink) writeBuffer(buf *bytes.Buffer) {
 
 	if err != nil {
 		s.mu.Lock()
-		s.handleFlushError(err, len)
+		s.handleFlushErrorSize(err, len)
 		s.mu.Unlock()
 		_ = s.conn.Close()
 		s.conn = nil // this will break the loop
@@ -268,6 +280,8 @@ var pbFree = sync.Pool{
 
 // Use a fast and simple buffer for constructing statsd messages
 type buffer []byte
+
+func (b *buffer) Len() int { return len(*b) }
 
 func (b *buffer) Reset() { *b = (*b)[:0] }
 
