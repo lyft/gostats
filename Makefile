@@ -2,7 +2,7 @@
 SRCS := $(shell find . -type d -name 'vendor' -prune -o -name '*.go' -print)
 
 .PHONY: install
-install: glide #download dependencies (including test deps) for the package
+install: #download dependencies (including test deps) for the package
 	go mod download
 
 .PHONY: lint
