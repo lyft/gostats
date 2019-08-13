@@ -4,6 +4,8 @@ go:
   - "1.11"
   - "1.12"
 
-before_install: GO111MODULE="on"
+before_install:
+  - mkdir -p $GOPATH/bin
+  - GO111MODULE="on"
 install:        make install
 script:         make lint test
