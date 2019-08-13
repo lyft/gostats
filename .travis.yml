@@ -5,7 +5,7 @@ go:
 
 env:
   global:
-    - GO111MODULE="on"
+    - GO111MODULE=on
 
 before_install:
   - mkdir -p $GOPATH/bin
