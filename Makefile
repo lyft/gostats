@@ -3,7 +3,7 @@ SRCS := $(shell find . -type d -name 'vendor' -prune -o -name '*.go' -print)
 
 .PHONY: install
 install: #download dependencies (including test deps) for the package
-	go mod download
+	GO111MODULE=on go mod download
 
 .PHONY: lint
 lint: #lints the package for common code smells
