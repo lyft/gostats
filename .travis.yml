@@ -7,7 +7,6 @@ env:
   global:
     - GO111MODULE=on
 
-before_install:
-  - mkdir -p $GOPATH/bin
+before_install: mkdir -p $GOPATH/bin
 install:        make install
 script:         make lint test

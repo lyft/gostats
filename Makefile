@@ -21,11 +21,10 @@ lint: #lints the package for common code smells
 
 .PHONY: test
 test: # runs all tests against the package with race detection and coverage percentage
-	go test -race -cover ./...
-
+	go test -mod=vendor -cover -race ./...
 .PHONY: quick
 quick: # runs all tests without coverage or the race detector
-	go test ./...
+	go test -mod=vendor -cover -race ./...
 
 .PHONY: cover
 cover: # runs all tests against the package, generating a coverage report and opening it in the default browser
