@@ -42,9 +42,8 @@ func NewTCPStatsdSink() FlushableSink {
 		// TODO(btc): parameterize size
 		bufWriter: bufio.NewWriterSize(&writer, defaultBufferSize),
 		// arbitrarily buffered
-		doFlush: make(chan struct{}, 8),
+		doFlush: make(chan chan struct{}, 8),
 	}
-	s.flushCond = sync.NewCond(&s.mu)
 	go s.run()
 	return s
 }
@@ -54,8 +53,7 @@ type tcpStatsdSink struct {
 	outc         chan *bytes.Buffer
 	mu           sync.Mutex
 	bufWriter    *bufio.Writer
-	flushCond    *sync.Cond
-	doFlush      chan struct{}
+	doFlush      chan chan struct{}
 	droppedBytes uint64
 }
 
@@ -79,13 +77,11 @@ func (s *tcpStatsdSink) Flush() {
 	if s.flush() != nil {
 		return // nothing we can do
 	}
-
-	s.doFlush <- struct{}{}
-	s.mu.Lock()
-	for len(s.outc) != 0 {
-		s.flushCond.Wait()
+	if len(s.outc) > 0 {
+		ch := make(chan struct{})
+		s.doFlush <- ch
+		<-ch
 	}
-	s.mu.Unlock()
 }
 
 func (s *tcpStatsdSink) flush() error {
@@ -202,7 +198,7 @@ func (s *tcpStatsdSink) run() {
 		select {
 		case <-t.C:
 			s.flush()
-		case <-s.doFlush:
+		case done := <-s.doFlush:
 			// Only flush pending buffers, this prevents an issue where
 			// continuous writes prevent the flush loop from exiting.
 			//
@@ -215,11 +211,7 @@ func (s *tcpStatsdSink) run() {
 				s.writeToConn(buf)
 				putBuffer(buf)
 			}
-			// Signal every blocked Flush() call. We don't handle multiple
-			// pending Flush() calls independently as we cannot allow this
-			// to block.  This is best effort only.
-			//
-			s.flushCond.Broadcast()
+			close(done)
 		case buf := <-s.outc:
 			s.writeToConn(buf)
 			putBuffer(buf)
