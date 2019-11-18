@@ -77,11 +77,9 @@ func (s *tcpStatsdSink) Flush() {
 	if s.flush() != nil {
 		return // nothing we can do
 	}
-	if len(s.outc) > 0 {
-		ch := make(chan struct{})
-		s.doFlush <- ch
-		<-ch
-	}
+	ch := make(chan struct{})
+	s.doFlush <- ch
+	<-ch
 }
 
 func (s *tcpStatsdSink) flush() error {
