@@ -6,4 +6,4 @@ go:
 
 before_install: mkdir -p $GOPATH/bin
 install:        make install
-script:         make lint test
+script:         make lint quick test
