@@ -11,6 +11,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	logger "github.com/sirupsen/logrus"
 )
 
 type testStatSink struct {
@@ -361,6 +363,12 @@ func TestStatGenerator(t *testing.T) {
 }
 
 func TestTCPStatsdSink_Flush(t *testing.T) {
+	// This test will generate a lot of "statsd channel full" errors
+	// so silence the logger.  This also means that this test cannot
+	// be ran in parallel.
+	logger.SetOutput(ioutil.Discard)
+	defer logger.SetOutput(os.Stderr)
+
 	lc, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatal(err)
@@ -393,6 +401,28 @@ func TestTCPStatsdSink_Flush(t *testing.T) {
 	}()
 
 	sink := NewTCPStatsdSink()
+
+	// Spin up a goroutine to flood the sink with large Counter stats.
+	// The goal here is to keep the buffer channel full.
+	ready := make(chan struct{}, 1)
+	done := make(chan struct{})
+	defer close(done)
+	go func() {
+		name := "test." + strings.Repeat("a", 1024) + ".counter"
+		for {
+			select {
+			case ready <- struct{}{}:
+				// signal that we've started
+			case <-done:
+				return
+			default:
+				for i := 0; i < 100; i++ {
+					sink.FlushCounter(name, 1)
+				}
+			}
+		}
+	}()
+	<-ready // wait for goroutine to start
 
 	t.Run("One", func(t *testing.T) {
 		flushed := make(chan struct{})
