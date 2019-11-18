@@ -416,7 +416,7 @@ func TestTCPStatsdSink_Flush(t *testing.T) {
 			case <-done:
 				return
 			default:
-				for i := 0; i < 100; i++ {
+				for i := 0; i < 1000; i++ {
 					sink.FlushCounter(name, 1)
 				}
 			}
