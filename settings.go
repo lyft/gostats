@@ -7,8 +7,8 @@ import (
 )
 
 const (
-	// DefaultUseStatsd use statsd as a stats sink, default is false.
-	DefaultUseStatsd = false
+	// DefaultUseStatsd use statsd as a stats sink, default is true.
+	DefaultUseStatsd = true
 	// DefaultStatsdHost is the default address where statsd is running at.
 	DefaultStatsdHost = "localhost"
 	// DefaultStatsdPort is the default port where statsd is listening at.
