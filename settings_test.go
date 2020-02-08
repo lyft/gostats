@@ -2,7 +2,10 @@ package stats
 
 import (
 	"os"
+	"reflect"
 	"testing"
+
+	"github.com/kelseyhightower/envconfig"
 )
 
 func testSetenv(t *testing.T, pairs ...string) (reset func()) {
@@ -12,8 +15,14 @@ func testSetenv(t *testing.T, pairs ...string) (reset func()) {
 		val := pairs[i+1]
 
 		prev, exists := os.LookupEnv(key)
-		if err := os.Setenv(key, val); err != nil {
-			t.Fatalf("setting env key: %s: %s", key, err)
+		if val == "" {
+			if err := os.Unsetenv(key); err != nil {
+				t.Fatalf("deleting env key: %s: %s", key, err)
+			}
+		} else {
+			if err := os.Setenv(key, val); err != nil {
+				t.Fatalf("setting env key: %s: %s", key, err)
+			}
 		}
 		if exists {
 			fns = append(fns, func() { os.Setenv(key, prev) })
@@ -25,6 +34,26 @@ func testSetenv(t *testing.T, pairs ...string) (reset func()) {
 		for _, fn := range fns {
 			fn()
 		}
+	}
+}
+
+func TestSettingsCompat(t *testing.T) {
+	reset := testSetenv(t,
+		"USE_STATSD", "",
+		"STATSD_HOST", "",
+		"STATSD_PORT", "",
+		"GOSTATS_FLUSH_INTERVAL_SECONDS", "",
+	)
+	defer reset()
+
+	var e Settings
+	if err := envconfig.Process("", &e); err != nil {
+		t.Fatal(err)
+	}
+
+	s := GetSettings()
+	if !reflect.DeepEqual(e, s) {
+		t.Fatalf("Default Settings: want: %+v got: %+v", e, s)
 	}
 }
 
