@@ -6,6 +6,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/lyft/gostats/smap"
 	logger "github.com/sirupsen/logrus"
 )
 
@@ -293,9 +294,9 @@ func (ts *timespan) CompleteWithDuration(value time.Duration) {
 }
 
 type statStore struct {
-	counters sync.Map
-	gauges   sync.Map
-	timers   sync.Map
+	counters smap.Map
+	gauges   smap.Map
+	timers   smap.Map
 
 	genMtx         sync.RWMutex
 	statGenerators []StatGenerator
@@ -310,16 +311,16 @@ func (s *statStore) Flush() {
 	}
 	s.genMtx.RUnlock()
 
-	s.counters.Range(func(key, v interface{}) bool {
+	s.counters.Range(func(key string, v interface{}) bool {
 		// Skip counters not incremented
 		if value := v.(*counter).latch(); value != 0 {
-			s.sink.FlushCounter(key.(string), value)
+			s.sink.FlushCounter(key, value)
 		}
 		return true
 	})
 
-	s.gauges.Range(func(key, v interface{}) bool {
-		s.sink.FlushGauge(key.(string), v.(*gauge).Value())
+	s.gauges.Range(func(key string, v interface{}) bool {
+		s.sink.FlushGauge(key, v.(*gauge).Value())
 		return true
 	})
 
