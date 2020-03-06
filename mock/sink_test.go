@@ -1,6 +1,7 @@
 package mock
 
 import (
+	"fmt"
 	"math"
 	"runtime"
 	"sync"
@@ -57,6 +58,13 @@ func TestSink(t *testing.T) {
 		testGauge(t, 1, sink)
 		testTimer(t, 1, sink)
 	}
+}
+
+// Test that the zero Sink is ready for use.
+func TestSinkLazyInit(t *testing.T) {
+	var s Sink
+	s.FlushCounter("counter", 1)
+	s.AssertCounterEquals(t, "counter", 1)
 }
 
 func TestFlushTimer(t *testing.T) {
@@ -181,4 +189,54 @@ func TestFatalExample(t *testing.T) {
 	sink := NewSink()
 	sink.FlushCounter("name", 1)
 	sink.AssertCounterEquals(Fatal(t), "name", 1)
+}
+
+func setupBenchmark(prefix string) (*Sink, [128]string) {
+	var names [128]string
+	if prefix == "" {
+		prefix = "mock_sink"
+	}
+	for i := 0; i < len(names); i++ {
+		names[i] = fmt.Sprintf("%s_%d", prefix, i)
+	}
+	sink := NewSink()
+	return sink, names
+}
+
+func BenchmarkFlushCounter(b *testing.B) {
+	sink, names := setupBenchmark("counter")
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		sink.FlushCounter(names[i%len(names)], uint64(i))
+	}
+}
+
+func BenchmarkFlushCounter_Parallel(b *testing.B) {
+	sink, names := setupBenchmark("counter")
+	b.ResetTimer()
+	b.RunParallel(func(pb *testing.PB) {
+		for i := 0; pb.Next(); i++ {
+			sink.FlushCounter(names[i%len(names)], uint64(i))
+		}
+	})
+}
+
+func BenchmarkFlushTimer(b *testing.B) {
+	const f = 1234.5678
+	sink, names := setupBenchmark("timer")
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		sink.FlushTimer(names[i%len(names)], f)
+	}
+}
+
+func BenchmarkFlushTimer_Parallel(b *testing.B) {
+	const f = 1234.5678
+	sink, names := setupBenchmark("timer")
+	b.ResetTimer()
+	b.RunParallel(func(pb *testing.PB) {
+		for i := 0; pb.Next(); i++ {
+			sink.FlushTimer(names[i%len(names)], f)
+		}
+	})
 }

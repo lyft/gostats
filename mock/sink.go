@@ -13,19 +13,33 @@ type entry struct {
 	count int64
 }
 
-// A Sink is a mock sink meant for testing that is safe for concurrent use.
-type Sink struct {
+type sink struct {
 	counters sync.Map
 	timers   sync.Map
 	gauges   sync.Map
-	// write held only during Reset(), all map accesses must hold the read lock
-	mu sync.RWMutex
 }
+
+// A Sink is a mock sink meant for testing that is safe for concurrent use.
+type Sink struct {
+	store atomic.Value
+	once  sync.Once
+}
+
+func (s *Sink) sink() *sink {
+	s.once.Do(func() { s.store.Store(new(sink)) })
+	return s.store.Load().(*sink)
+}
+
+func (s *Sink) counters() *sync.Map { return &s.sink().counters }
+func (s *Sink) timers() *sync.Map   { return &s.sink().timers }
+func (s *Sink) gauges() *sync.Map   { return &s.sink().gauges }
 
 // NewSink returns a new Sink which implements the stats.Sink interface and is
 // suitable for testing.
 func NewSink() *Sink {
-	return new(Sink)
+	s := &Sink{}
+	s.sink() // lazy init
+	return s
 }
 
 // Flush is a no-op method
@@ -33,22 +47,17 @@ func (*Sink) Flush() {}
 
 // Reset resets the Sink's counters, timers and gauges to zero.
 func (s *Sink) Reset() {
-	s.mu.Lock()
-	s.counters = sync.Map{}
-	s.timers = sync.Map{}
-	s.gauges = sync.Map{}
-	s.mu.Unlock()
+	s.store.Store(new(sink))
 }
 
 // FlushCounter implements the stats.Sink.FlushCounter method and adds val to
 // stat name.
 func (s *Sink) FlushCounter(name string, val uint64) {
-	s.mu.RLock()
-	v, ok := s.counters.Load(name)
+	counters := s.counters()
+	v, ok := counters.Load(name)
 	if !ok {
-		v, _ = s.counters.LoadOrStore(name, new(entry))
+		v, _ = counters.LoadOrStore(name, new(entry))
 	}
-	s.mu.RUnlock()
 	p := v.(*entry)
 	atomic.AddUint64(&p.val, val)
 	atomic.AddInt64(&p.count, 1)
@@ -57,12 +66,11 @@ func (s *Sink) FlushCounter(name string, val uint64) {
 // FlushGauge implements the stats.Sink.FlushGauge method and adds val to
 // stat name.
 func (s *Sink) FlushGauge(name string, val uint64) {
-	s.mu.RLock()
-	v, ok := s.gauges.Load(name)
+	gauges := s.gauges()
+	v, ok := gauges.Load(name)
 	if !ok {
-		v, _ = s.gauges.LoadOrStore(name, new(entry))
+		v, _ = gauges.LoadOrStore(name, new(entry))
 	}
-	s.mu.RUnlock()
 	p := v.(*entry)
 	atomic.AddUint64(&p.val, val)
 	atomic.AddInt64(&p.count, 1)
@@ -83,12 +91,11 @@ func atomicAddFloat64(dest *uint64, delta float64) {
 // FlushTimer implements the stats.Sink.FlushTimer method and adds val to
 // stat name.
 func (s *Sink) FlushTimer(name string, val float64) {
-	s.mu.RLock()
-	v, ok := s.timers.Load(name)
+	timers := s.timers()
+	v, ok := timers.Load(name)
 	if !ok {
-		v, _ = s.timers.LoadOrStore(name, new(entry))
+		v, _ = timers.LoadOrStore(name, new(entry))
 	}
-	s.mu.RUnlock()
 	p := v.(*entry)
 	atomicAddFloat64(&p.val, val)
 	atomic.AddInt64(&p.count, 1)
@@ -96,9 +103,7 @@ func (s *Sink) FlushTimer(name string, val float64) {
 
 // LoadCounter returns the value for stat name and if it was found.
 func (s *Sink) LoadCounter(name string) (uint64, bool) {
-	s.mu.RLock()
-	v, ok := s.counters.Load(name)
-	s.mu.RUnlock()
+	v, ok := s.counters().Load(name)
 	if ok {
 		p := v.(*entry)
 		return atomic.LoadUint64(&p.val), true
@@ -108,9 +113,7 @@ func (s *Sink) LoadCounter(name string) (uint64, bool) {
 
 // LoadGauge returns the value for stat name and if it was found.
 func (s *Sink) LoadGauge(name string) (uint64, bool) {
-	s.mu.RLock()
-	v, ok := s.gauges.Load(name)
-	s.mu.RUnlock()
+	v, ok := s.gauges().Load(name)
 	if ok {
 		p := v.(*entry)
 		return atomic.LoadUint64(&p.val), true
@@ -120,9 +123,7 @@ func (s *Sink) LoadGauge(name string) (uint64, bool) {
 
 // LoadTimer returns the value for stat name and if it was found.
 func (s *Sink) LoadTimer(name string) (float64, bool) {
-	s.mu.RLock()
-	v, ok := s.timers.Load(name)
-	s.mu.RUnlock()
+	v, ok := s.timers().Load(name)
 	if ok {
 		p := v.(*entry)
 		bits := atomic.LoadUint64(&p.val)
@@ -155,9 +156,7 @@ func (s *Sink) Timer(name string) float64 {
 
 // CounterCallCount returns the number of times stat name has been called/updated.
 func (s *Sink) CounterCallCount(name string) int64 {
-	s.mu.RLock()
-	v, ok := s.counters.Load(name)
-	s.mu.RUnlock()
+	v, ok := s.counters().Load(name)
 	if ok {
 		return atomic.LoadInt64(&v.(*entry).count)
 	}
@@ -166,9 +165,7 @@ func (s *Sink) CounterCallCount(name string) int64 {
 
 // GaugeCallCount returns the number of times stat name has been called/updated.
 func (s *Sink) GaugeCallCount(name string) int64 {
-	s.mu.RLock()
-	v, ok := s.gauges.Load(name)
-	s.mu.RUnlock()
+	v, ok := s.gauges().Load(name)
 	if ok {
 		return atomic.LoadInt64(&v.(*entry).count)
 	}
@@ -177,9 +174,7 @@ func (s *Sink) GaugeCallCount(name string) int64 {
 
 // TimerCallCount returns the number of times stat name has been called/updated.
 func (s *Sink) TimerCallCount(name string) int64 {
-	s.mu.RLock()
-	v, ok := s.timers.Load(name)
-	s.mu.RUnlock()
+	v, ok := s.timers().Load(name)
 	if ok {
 		return atomic.LoadInt64(&v.(*entry).count)
 	}
@@ -278,7 +273,7 @@ func (s *Sink) AssertTimerNotExists(tb testing.TB, name string) {
 // AssertCounterCallCount asserts that Counter name was called exp times.
 func (s *Sink) AssertCounterCallCount(tb testing.TB, name string, exp int) {
 	tb.Helper()
-	v, ok := s.counters.Load(name)
+	v, ok := s.counters().Load(name)
 	if !ok {
 		tb.Errorf("gostats/mock: Counter (%q): not found", name)
 		return
@@ -294,7 +289,7 @@ func (s *Sink) AssertCounterCallCount(tb testing.TB, name string, exp int) {
 // AssertGaugeCallCount asserts that Gauge name was called exp times.
 func (s *Sink) AssertGaugeCallCount(tb testing.TB, name string, exp int) {
 	tb.Helper()
-	v, ok := s.gauges.Load(name)
+	v, ok := s.gauges().Load(name)
 	if !ok {
 		tb.Errorf("gostats/mock: Gauge (%q): not found", name)
 		return
@@ -310,7 +305,7 @@ func (s *Sink) AssertGaugeCallCount(tb testing.TB, name string, exp int) {
 // AssertTimerCallCount asserts that Timer name was called exp times.
 func (s *Sink) AssertTimerCallCount(tb testing.TB, name string, exp int) {
 	tb.Helper()
-	v, ok := s.timers.Load(name)
+	v, ok := s.timers().Load(name)
 	if !ok {
 		tb.Errorf("gostats/mock: Timer (%q): not found", name)
 		return
