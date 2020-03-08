@@ -166,6 +166,25 @@ func TestSerializeTagDiscardEmptyTagKeyValue(t *testing.T) {
 	}
 }
 
+func TestSerializeTag(t *testing.T) {
+	const (
+		prefix = ".__"
+		sep    = "="
+		name   = "x"
+	)
+	if s := serializeTag(name, "", "value"); s != name {
+		t.Errorf("serializeTag: got: %q want: %q", s, name)
+	}
+	if s := serializeTag(name, "key", ""); s != name {
+		t.Errorf("serializeTag: got: %q want: %q", s, name)
+	}
+
+	exp := name + prefix + "key" + sep + replaceChars("value")
+	if s := serializeTag(name, "key", "value"); s != exp {
+		t.Errorf("serializeTag: got: %q want: %q", s, exp)
+	}
+}
+
 func benchmarkSerializeTags(b *testing.B, n int) {
 	const name = "prefix"
 	tags := make(map[string]string, n)
@@ -177,6 +196,17 @@ func benchmarkSerializeTags(b *testing.B, n int) {
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		serializeTags(name, tags)
+	}
+}
+
+func BenchmarkSerializeTag(b *testing.B) {
+	const (
+		name  = "prefix"
+		key   = "key1"
+		value = "value1"
+	)
+	for i := 0; i < b.N; i++ {
+		serializeTag(name, key, value)
 	}
 }
 

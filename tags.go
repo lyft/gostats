@@ -16,6 +16,15 @@ func (t tagSet) Len() int           { return len(t) }
 func (t tagSet) Swap(i, j int)      { t[i], t[j] = t[j], t[i] }
 func (t tagSet) Less(i, j int) bool { return t[i].dimension < t[j].dimension }
 
+func serializeTag(name, key, value string) string {
+	const prefix = ".__"
+	const sep = "="
+	if key == "" || value == "" {
+		return name
+	}
+	return name + prefix + key + sep + replaceChars(value)
+}
+
 func serializeTags(name string, tags map[string]string) string {
 	const prefix = ".__"
 	const sep = "="

@@ -88,6 +88,17 @@ func BenchmarkStore_NewCounterWithTags(b *testing.B) {
 	}
 }
 
+func BenchmarkStore_NewCounterWithTag(b *testing.B) {
+	s := NewStore(nullSink{}, false)
+	t := time.NewTicker(time.Hour) // don't flush
+	defer t.Stop()
+	go s.Start(t)
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		s.NewCounterWithTag("counter_name", "tag1", "val1")
+	}
+}
+
 func initBenchScope() (scope Scope, childTags map[string]string) {
 	s := NewStore(nullSink{}, false)
 

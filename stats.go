@@ -70,6 +70,9 @@ type Scope interface {
 	// NewCounter adds a Counter to a store, or a scope.
 	NewCounter(name string) Counter
 
+	// NewCounterWithTag adds a count with a Tag to a store or scope.
+	NewCounterWithTag(name, key, value string) Counter
+
 	// NewCounterWithTags adds a Counter with Tags to a store, or a scope.
 	NewCounterWithTags(name string, tags map[string]string) Counter
 
@@ -79,6 +82,9 @@ type Scope interface {
 	// NewGauge adds a Gauge to a store, or a scope.
 	NewGauge(name string) Gauge
 
+	// NewGaugeWithTag adds a count with a Tag to a store or scope.
+	NewGaugeWithTag(name, key, value string) Gauge
+
 	// NewGaugeWithTags adds a Gauge with Tags to a store, or a scope.
 	NewGaugeWithTags(name string, tags map[string]string) Gauge
 
@@ -87,6 +93,9 @@ type Scope interface {
 
 	// NewTimer adds a Timer to a store, or a scope.
 	NewTimer(name string) Timer
+
+	// NewTimerWithTag adds a count with a Tag to a store or scope.
+	NewTimerWithTag(name, key, value string) Timer
 
 	// NewTimerWithTags adds a Timer with Tags to a store, or a scope with Tags.
 	NewTimerWithTags(name string, tags map[string]string) Timer
@@ -361,6 +370,18 @@ func (s *statStore) NewCounter(name string) Counter {
 	return s.NewCounterWithTags(name, nil)
 }
 
+func (s *statStore) NewCounterWithTag(name, key, value string) Counter {
+	name = serializeTag(name, key, value)
+	if v, ok := s.counters.Load(name); ok {
+		return v.(*counter)
+	}
+	c := new(counter)
+	if v, loaded := s.counters.LoadOrStore(name, c); loaded {
+		c = v.(*counter)
+	}
+	return c
+}
+
 func (s *statStore) NewCounterWithTags(name string, tags map[string]string) Counter {
 	name = serializeTags(name, tags)
 	if v, ok := s.counters.Load(name); ok {
@@ -373,11 +394,9 @@ func (s *statStore) NewCounterWithTags(name string, tags map[string]string) Coun
 	return c
 }
 
-var emptyPerInstanceTags = map[string]string{"_f": "i"}
-
 func (s *statStore) NewPerInstanceCounter(name string, tags map[string]string) Counter {
 	if len(tags) == 0 {
-		return s.NewCounterWithTags(name, emptyPerInstanceTags)
+		return s.NewCounterWithTag(name, "_f", "i")
 	}
 
 	if _, found := tags["_f"]; !found {
@@ -389,6 +408,18 @@ func (s *statStore) NewPerInstanceCounter(name string, tags map[string]string) C
 
 func (s *statStore) NewGauge(name string) Gauge {
 	return s.NewGaugeWithTags(name, nil)
+}
+
+func (s *statStore) NewGaugeWithTag(name, key, value string) Gauge {
+	name = serializeTag(name, key, value)
+	if v, ok := s.gauges.Load(name); ok {
+		return v.(*gauge)
+	}
+	g := new(gauge)
+	if v, loaded := s.gauges.LoadOrStore(name, g); loaded {
+		g = v.(*gauge)
+	}
+	return g
 }
 
 func (s *statStore) NewGaugeWithTags(name string, tags map[string]string) Gauge {
@@ -405,7 +436,7 @@ func (s *statStore) NewGaugeWithTags(name string, tags map[string]string) Gauge 
 
 func (s *statStore) NewPerInstanceGauge(name string, tags map[string]string) Gauge {
 	if len(tags) == 0 {
-		return s.NewGaugeWithTags(name, emptyPerInstanceTags)
+		return s.NewGaugeWithTag(name, "_f", "i")
 	}
 
 	if _, found := tags["_f"]; !found {
@@ -417,6 +448,18 @@ func (s *statStore) NewPerInstanceGauge(name string, tags map[string]string) Gau
 
 func (s *statStore) NewTimer(name string) Timer {
 	return s.NewTimerWithTags(name, nil)
+}
+
+func (s *statStore) NewTimerWithTag(name, key, value string) Timer {
+	name = serializeTag(name, key, value)
+	if v, ok := s.timers.Load(name); ok {
+		return v.(*timer)
+	}
+	t := &timer{name: name, sink: s.sink}
+	if v, loaded := s.timers.LoadOrStore(name, t); loaded {
+		t = v.(*timer)
+	}
+	return t
 }
 
 func (s *statStore) NewTimerWithTags(name string, tags map[string]string) Timer {
@@ -433,7 +476,7 @@ func (s *statStore) NewTimerWithTags(name string, tags map[string]string) Timer 
 
 func (s *statStore) NewPerInstanceTimer(name string, tags map[string]string) Timer {
 	if len(tags) == 0 {
-		return s.NewTimerWithTags(name, emptyPerInstanceTags)
+		return s.NewTimerWithTag(name, "_f", "i")
 	}
 
 	if _, found := tags["_f"]; !found {
@@ -465,6 +508,13 @@ func (s subScope) NewCounter(name string) Counter {
 	return s.NewCounterWithTags(name, nil)
 }
 
+func (s subScope) NewCounterWithTag(name, key, value string) Counter {
+	if len(s.tags) == 0 {
+		return s.registry.NewCounterWithTag(joinScopes(s.name, name), key, value)
+	}
+	return s.registry.NewCounterWithTags(joinScopes(s.name, name), s.appendTag(key, value))
+}
+
 func (s subScope) NewCounterWithTags(name string, tags map[string]string) Counter {
 	return s.registry.NewCounterWithTags(joinScopes(s.name, name), s.mergeTags(tags))
 }
@@ -477,6 +527,13 @@ func (s subScope) NewGauge(name string) Gauge {
 	return s.NewGaugeWithTags(name, nil)
 }
 
+func (s subScope) NewGaugeWithTag(name, key, value string) Gauge {
+	if len(s.tags) == 0 {
+		return s.registry.NewGaugeWithTag(joinScopes(s.name, name), key, value)
+	}
+	return s.registry.NewGaugeWithTags(joinScopes(s.name, name), s.appendTag(key, value))
+}
+
 func (s subScope) NewGaugeWithTags(name string, tags map[string]string) Gauge {
 	return s.registry.NewGaugeWithTags(joinScopes(s.name, name), s.mergeTags(tags))
 }
@@ -487,6 +544,13 @@ func (s subScope) NewPerInstanceGauge(name string, tags map[string]string) Gauge
 
 func (s subScope) NewTimer(name string) Timer {
 	return s.NewTimerWithTags(name, nil)
+}
+
+func (s subScope) NewTimerWithTag(name, key, value string) Timer {
+	if len(s.tags) == 0 {
+		return s.registry.NewTimerWithTag(joinScopes(s.name, name), key, value)
+	}
+	return s.registry.NewTimerWithTags(joinScopes(s.name, name), s.appendTag(key, value))
 }
 
 func (s subScope) NewTimerWithTags(name string, tags map[string]string) Timer {
@@ -516,4 +580,21 @@ func (s subScope) mergeTags(tags map[string]string) map[string]string {
 		}
 	}
 	return tags
+}
+
+func (s subScope) appendTag(key, value string) map[string]string {
+	n := len(s.tags)
+	// CEV: only check if the key does not exist when it would
+	// cause the map to grow (Go maps use buckets of 8).
+	if n%8 == 0 {
+		if _, ok := s.tags[key]; !ok {
+			n++
+		}
+	}
+	m := make(map[string]string, n)
+	for k, v := range s.tags {
+		m[k] = v
+	}
+	m[key] = value
+	return m
 }
