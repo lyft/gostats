@@ -62,6 +62,24 @@ func WithLogger(log *logger.Logger) SinkOption {
 	})
 }
 
+func withConn(conn net.Conn) SinkOption {
+	return sinkOptionFunc(func(sink *tcpStatsdSink) {
+		sink.conn = conn
+	})
+}
+
+func withBufioWriter(wr *bufio.Writer) SinkOption {
+	return sinkOptionFunc(func(sink *tcpStatsdSink) {
+		sink.bufWriter = wr
+	})
+}
+
+func withFlushInterval(d time.Duration) SinkOption {
+	return sinkOptionFunc(func(sink *tcpStatsdSink) {
+		sink.flushInterval = d
+	})
+}
+
 // NewTCPStatsdSink returns a FlushableSink that is backed by a buffered writer
 // and a separate goroutine that flushes those buffers to a statsd connection.
 func NewTCPStatsdSink(opts ...SinkOption) FlushableSink {
@@ -78,9 +96,10 @@ func NewTCPStatsdSink(opts ...SinkOption) FlushableSink {
 		// arbitrarily buffered
 		doFlush: make(chan chan struct{}, 8),
 		// CEV: default to the standard logger to match the legacy implementation.
-		log:        logger.StandardLogger(),
-		statsdHost: conf.StatsdHost,
-		statsdPort: conf.StatsdPort,
+		log:           logger.StandardLogger(),
+		statsdHost:    conf.StatsdHost,
+		statsdPort:    conf.StatsdPort,
+		flushInterval: flushInterval,
 	}
 	for _, opt := range opts {
 		opt.apply(s)
@@ -90,15 +109,16 @@ func NewTCPStatsdSink(opts ...SinkOption) FlushableSink {
 }
 
 type tcpStatsdSink struct {
-	conn         net.Conn
-	outc         chan *bytes.Buffer
-	mu           sync.Mutex
-	bufWriter    *bufio.Writer
-	doFlush      chan chan struct{}
-	droppedBytes uint64
-	log          *logger.Logger
-	statsdHost   string
-	statsdPort   int
+	conn          net.Conn
+	outc          chan *bytes.Buffer
+	mu            sync.Mutex
+	bufWriter     *bufio.Writer
+	doFlush       chan chan struct{}
+	droppedBytes  uint64
+	log           *logger.Logger
+	statsdHost    string
+	statsdPort    int
+	flushInterval time.Duration
 }
 
 type sinkWriter struct {

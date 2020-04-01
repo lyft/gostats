@@ -993,3 +993,28 @@ func BenchmarkFlushTimer(b *testing.B) {
 		sink.FlushTimer("TestTImer.___f=i.__tag1=v1", float64(i)/3)
 	}
 }
+
+type nopConn struct{}
+
+func (nopConn) Read(b []byte) (n int, err error)   { return len(b), nil }
+func (nopConn) Write(b []byte) (n int, err error)  { return len(b), nil }
+func (nopConn) Close() error                       { return nil }
+func (nopConn) LocalAddr() net.Addr                { return nil }
+func (nopConn) RemoteAddr() net.Addr               { return nil }
+func (nopConn) SetDeadline(t time.Time) error      { return nil }
+func (nopConn) SetReadDeadline(t time.Time) error  { return nil }
+func (nopConn) SetWriteDeadline(t time.Time) error { return nil }
+
+func BenchmarkFlushCounter_Sink(b *testing.B) {
+	sink := NewTCPStatsdSink(
+		withConn(nopConn{}),
+		withBufioWriter(bufio.NewWriter(nopWriter{})),
+		withFlushInterval(time.Millisecond*10),
+	).(*tcpStatsdSink)
+	b.SetBytes(int64(len("TestCounter.___f=i.__tag1=v1:12345678|c\n")))
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		sink.FlushCounter("TestCounter.___f=i.__tag1=v1", 12345678)
+	}
+}
