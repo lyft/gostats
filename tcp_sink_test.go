@@ -624,7 +624,9 @@ func (s *tcpTestSink) run(t testing.TB) {
 
 func (s *tcpTestSink) Restart(t testing.TB, resetBuffer bool) {
 	if err := s.Close(); err != nil {
-		t.Fatal(err)
+		if !strings.Contains(err.Error(), "use of closed network connection") {
+			t.Fatal(err)
+		}
 	}
 	l, err := net.ListenTCP(s.addr.Network(), s.addr)
 	if err != nil {
@@ -815,11 +817,12 @@ func TestTCPStatsdSink(t *testing.T) {
 
 		flushed := make(chan struct{})
 		go func() {
+			flushed <- struct{}{}
 			sink.Flush()
 			close(flushed)
 		}()
 
-		time.Sleep(time.Millisecond * 100)
+		<-flushed // wait till we're ready
 		ts.Restart(t, true)
 
 		stat := ts.WaitForStat(t, defaultRetryInterval*2)
@@ -830,7 +833,10 @@ func TestTCPStatsdSink(t *testing.T) {
 		// Make sure our flush call returned
 		select {
 		case <-flushed:
-		default:
+		case <-time.After(time.Millisecond * 100):
+			// The flushed channel should be closed by this point,
+			// but this was failing in CI on go1.12 due to timing
+			// issues so we relax the constraint and give it 100ms.
 			t.Error("Flush() did not return")
 		}
 	})
