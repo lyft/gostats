@@ -824,7 +824,7 @@ func TestTCPStatsdSink(t *testing.T) {
 
 		stat := ts.WaitForStat(t, defaultRetryInterval*2)
 		if stat != expected {
-			t.Errorf("stats got: %q want: %q", stat, expected)
+			t.Fatalf("stats got: %q want: %q", stat, expected)
 		}
 
 		// Make sure our flush call returned
