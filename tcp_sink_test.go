@@ -628,6 +628,12 @@ func (s *tcpTestSink) Restart(t testing.TB, resetBuffer bool) {
 			t.Fatal(err)
 		}
 	}
+	select {
+	case <-s.done:
+		// Ok
+	case <-time.After(time.Second * 3):
+		t.Fatal("timeout waiting for run loop to exit")
+	}
 	l, err := net.ListenTCP(s.addr.Network(), s.addr)
 	if err != nil {
 		t.Fatalf("restarting connection: %v", err)
