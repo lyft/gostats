@@ -2,8 +2,8 @@ package stats
 
 import (
 	"bufio"
-	"bytes"
 	"fmt"
+	"io"
 	"math"
 	"net"
 	"strconv"
@@ -83,7 +83,7 @@ func withFlushInterval(d time.Duration) SinkOption {
 // NewTCPStatsdSink returns a FlushableSink that is backed by a buffered writer
 // and a separate goroutine that flushes those buffers to a statsd connection.
 func NewTCPStatsdSink(opts ...SinkOption) FlushableSink {
-	outc := make(chan *bytes.Buffer, chanSize) // TODO(btc): parameterize
+	outc := make(chan *buffer, chanSize) // TODO(btc): parameterize
 	writer := sinkWriter{
 		outc: outc,
 	}
@@ -110,7 +110,7 @@ func NewTCPStatsdSink(opts ...SinkOption) FlushableSink {
 
 type tcpStatsdSink struct {
 	conn          net.Conn
-	outc          chan *bytes.Buffer
+	outc          chan *buffer
 	mu            sync.Mutex
 	bufWriter     *bufio.Writer
 	doFlush       chan chan struct{}
@@ -122,7 +122,7 @@ type tcpStatsdSink struct {
 }
 
 type sinkWriter struct {
-	outc chan<- *bytes.Buffer
+	outc chan<- *buffer
 }
 
 func (w *sinkWriter) Write(p []byte) (int, error) {
@@ -207,7 +207,7 @@ func (s *tcpStatsdSink) writeBuffer(b *buffer) {
 }
 
 func (s *tcpStatsdSink) flushUint64(name, suffix string, u uint64) {
-	b := pbFree.Get().(*buffer)
+	b := getBuffer()
 
 	b.WriteString(name)
 	b.WriteChar(':')
@@ -216,12 +216,11 @@ func (s *tcpStatsdSink) flushUint64(name, suffix string, u uint64) {
 
 	s.writeBuffer(b)
 
-	b.Reset()
-	pbFree.Put(b)
+	putBuffer(b)
 }
 
 func (s *tcpStatsdSink) flushFloat64(name, suffix string, f float64) {
-	b := pbFree.Get().(*buffer)
+	b := getBuffer()
 
 	b.WriteString(name)
 	b.WriteChar(':')
@@ -230,8 +229,7 @@ func (s *tcpStatsdSink) flushFloat64(name, suffix string, f float64) {
 
 	s.writeBuffer(b)
 
-	b.Reset()
-	pbFree.Put(b)
+	putBuffer(b)
 }
 
 func (s *tcpStatsdSink) FlushCounter(name string, value uint64) {
@@ -260,7 +258,7 @@ func (s *tcpStatsdSink) run() {
 
 	var reconnectFailed bool // true if last reconnect failed
 
-	t := time.NewTicker(flushInterval)
+	t := time.NewTicker(s.flushInterval)
 	defer t.Stop()
 	for {
 		if s.conn == nil {
@@ -307,7 +305,7 @@ func (s *tcpStatsdSink) run() {
 
 // writeToConn writes the buffer to the underlying conn.  May only be called
 // from run().
-func (s *tcpStatsdSink) writeToConn(buf *bytes.Buffer) {
+func (s *tcpStatsdSink) writeToConn(buf *buffer) {
 	len := buf.Len()
 
 	// TODO (CEV): parameterize timeout
@@ -333,27 +331,20 @@ func (s *tcpStatsdSink) connect(address string) error {
 	return err
 }
 
-var bufferPool sync.Pool
-
-func getBuffer() *bytes.Buffer {
-	if v := bufferPool.Get(); v != nil {
-		b := v.(*bytes.Buffer)
-		b.Reset()
-		return b
-	}
-	return new(bytes.Buffer)
-}
-
-func putBuffer(b *bytes.Buffer) {
-	bufferPool.Put(b)
-}
-
-// pbFree is the print buffer pool
-var pbFree = sync.Pool{
+var bufferPool = sync.Pool{
 	New: func() interface{} {
 		b := make(buffer, 0, 128)
 		return &b
 	},
+}
+
+func getBuffer() *buffer {
+	return bufferPool.Get().(*buffer)
+}
+
+func putBuffer(b *buffer) {
+	b.Reset()
+	bufferPool.Put(b)
 }
 
 // Use a fast and simple buffer for constructing statsd messages
@@ -386,4 +377,23 @@ func (b *buffer) WriteUnit64(val uint64) {
 
 func (b *buffer) WriteFloat64(val float64) {
 	*b = strconv.AppendFloat(*b, val, 'f', 6, 64)
+}
+
+func (b *buffer) WriteTo(w io.Writer) (n int64, err error) {
+	nLen := b.Len()
+	if nLen > 0 {
+		m, e := w.Write(*b)
+		if m > nLen {
+			// CEV: match the behavior of bytes.Buffer.WriteTo
+			panic("buffer.WriteTo: invalid Write count")
+		}
+		n = int64(m)
+		if e != nil {
+			return n, e
+		}
+		if m != nLen {
+			return n, io.ErrShortWrite
+		}
+	}
+	return n, nil
 }
