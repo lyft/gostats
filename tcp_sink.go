@@ -25,6 +25,14 @@ const (
 	chanSize                = approxMaxMemBytes / defaultBufferSize
 )
 
+// bufferPoolLarge stores large buffers for *tcpStatsdSink.Write().
+var bufferPoolLarge = sync.Pool{
+	New: func() interface{} {
+		b := make(buffer, 0, defaultBufferSize)
+		return &b
+	},
+}
+
 // An SinkOption configures a Sink.
 type SinkOption interface {
 	apply(*tcpStatsdSink)
@@ -126,14 +134,14 @@ type sinkWriter struct {
 }
 
 func (w *sinkWriter) Write(p []byte) (int, error) {
-	n := len(p)
-	dest := getBuffer()
+	dest := bufferPoolLarge.Get().(*buffer)
+	dest.Reset()
 	dest.Write(p)
 	select {
 	case w.outc <- dest:
-		return n, nil
+		return len(p), nil
 	default:
-		return 0, fmt.Errorf("statsd channel full, dropping stats buffer with %d bytes", n)
+		return 0, fmt.Errorf("statsd channel full, dropping stats buffer with %d bytes", len(p))
 	}
 }
 
@@ -206,8 +214,17 @@ func (s *tcpStatsdSink) writeBuffer(b *buffer) {
 	s.mu.Unlock()
 }
 
+// bufferPoolFlush stores small buffers for formatting stats messages.
+var bufferPoolFlush = sync.Pool{
+	New: func() interface{} {
+		b := make(buffer, 0, 128)
+		return &b
+	},
+}
+
 func (s *tcpStatsdSink) flushUint64(name, suffix string, u uint64) {
-	b := getBuffer()
+	b := bufferPoolFlush.Get().(*buffer)
+	b.Reset()
 
 	b.WriteString(name)
 	b.WriteChar(':')
@@ -216,11 +233,12 @@ func (s *tcpStatsdSink) flushUint64(name, suffix string, u uint64) {
 
 	s.writeBuffer(b)
 
-	putBuffer(b)
+	bufferPoolFlush.Put(b)
 }
 
 func (s *tcpStatsdSink) flushFloat64(name, suffix string, f float64) {
-	b := getBuffer()
+	b := bufferPoolFlush.Get().(*buffer)
+	b.Reset()
 
 	b.WriteString(name)
 	b.WriteChar(':')
@@ -229,7 +247,7 @@ func (s *tcpStatsdSink) flushFloat64(name, suffix string, f float64) {
 
 	s.writeBuffer(b)
 
-	putBuffer(b)
+	bufferPoolFlush.Put(b)
 }
 
 func (s *tcpStatsdSink) FlushCounter(name string, value uint64) {
@@ -293,12 +311,12 @@ func (s *tcpStatsdSink) run() {
 			for i := 0; i < n && s.conn != nil; i++ {
 				buf := <-s.outc
 				s.writeToConn(buf)
-				putBuffer(buf)
+				bufferPoolLarge.Put(buf)
 			}
 			close(done)
 		case buf := <-s.outc:
 			s.writeToConn(buf)
-			putBuffer(buf)
+			bufferPoolLarge.Put(buf)
 		}
 	}
 }
@@ -329,22 +347,6 @@ func (s *tcpStatsdSink) connect(address string) error {
 		s.conn = conn
 	}
 	return err
-}
-
-var bufferPool = sync.Pool{
-	New: func() interface{} {
-		b := make(buffer, 0, 128)
-		return &b
-	},
-}
-
-func getBuffer() *buffer {
-	return bufferPool.Get().(*buffer)
-}
-
-func putBuffer(b *buffer) {
-	b.Reset()
-	bufferPool.Put(b)
 }
 
 // Use a fast and simple buffer for constructing statsd messages
