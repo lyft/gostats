@@ -44,6 +44,7 @@ func TestSettingsCompat(t *testing.T) {
 		"STATSD_PROTOCOL", "",
 		"STATSD_PORT", "",
 		"GOSTATS_FLUSH_INTERVAL_SECONDS", "",
+		"GOSTATS_LOGGING_SINK_ENABLED", "",
 	)
 	defer reset()
 
@@ -65,14 +66,16 @@ func TestSettingsDefault(t *testing.T) {
 		"STATSD_PROTOCOL", "",
 		"STATSD_PORT", "",
 		"GOSTATS_FLUSH_INTERVAL_SECONDS", "",
+		"GOSTATS_LOGGING_SINK_ENABLED", "",
 	)
 	defer reset()
 	exp := Settings{
-		UseStatsd:      DefaultUseStatsd,
-		StatsdHost:     DefaultStatsdHost,
-		StatsdProtocol: DefaultStatsdProtocol,
-		StatsdPort:     DefaultStatsdPort,
-		FlushIntervalS: DefaultFlushIntervalS,
+		UseStatsd:          DefaultUseStatsd,
+		StatsdHost:         DefaultStatsdHost,
+		StatsdProtocol:     DefaultStatsdProtocol,
+		StatsdPort:         DefaultStatsdPort,
+		FlushIntervalS:     DefaultFlushIntervalS,
+		LoggingSinkEnabled: DefaultLoggingSinkEnabled,
 	}
 	settings := GetSettings()
 	if exp != settings {
@@ -87,14 +90,16 @@ func TestSettingsOverride(t *testing.T) {
 		"STATSD_PROTOCOL", "udp",
 		"STATSD_PORT", "1234",
 		"GOSTATS_FLUSH_INTERVAL_SECONDS", "3",
+		"GOSTATS_LOGGING_SINK_ENABLED", "true",
 	)
 	defer reset()
 	exp := Settings{
-		UseStatsd:      true,
-		StatsdHost:     "10.0.0.1",
-		StatsdProtocol: "udp",
-		StatsdPort:     1234,
-		FlushIntervalS: 3,
+		UseStatsd:          true,
+		StatsdHost:         "10.0.0.1",
+		StatsdProtocol:     "udp",
+		StatsdPort:         1234,
+		FlushIntervalS:     3,
+		LoggingSinkEnabled: true,
 	}
 	settings := GetSettings()
 	if exp != settings {
@@ -109,6 +114,7 @@ func TestSettingsErrors(t *testing.T) {
 		"USE_STATSD":                     "FOO!",
 		"STATSD_PORT":                    "not-an-int",
 		"GOSTATS_FLUSH_INTERVAL_SECONDS": "true",
+		"GOSTATS_LOGGING_SINK_ENABLED":   "1337",
 	}
 	for key, val := range tests {
 		t.Run(key, func(t *testing.T) {
