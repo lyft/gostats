@@ -10,6 +10,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/lyft/gostats/internal/bufferpool"
+	"github.com/lyft/gostats/internal/stat"
 	logger "github.com/sirupsen/logrus"
 )
 
@@ -90,8 +92,14 @@ func NewTCPStatsdSink(opts ...SinkOption) FlushableSink {
 }
 
 type tcpStatsdSink struct {
+	// NEW
+	stats <-chan stat.Stat
+	bw    *bufio.Writer
+
+	// KILL THIS
+	outc chan *bytes.Buffer
+
 	conn         net.Conn
-	outc         chan *bytes.Buffer
 	mu           sync.Mutex
 	bufWriter    *bufio.Writer
 	doFlush      chan chan struct{}
@@ -278,6 +286,15 @@ func (s *tcpStatsdSink) run() {
 				putBuffer(buf)
 			}
 			close(done)
+		case stat := <-s.stats:
+			b := bufferpool.Get()
+			stat.Format(b)
+			if s.bw.Available() < b.Len() {
+				s.bw.Flush() // WARN: check error
+			}
+			s.bw.Write(b.Bytes()) // WARN: check error
+			b.Free()
+		// KILL
 		case buf := <-s.outc:
 			s.writeToConn(buf)
 			putBuffer(buf)
@@ -307,8 +324,17 @@ func (s *tcpStatsdSink) writeToConn(buf *bytes.Buffer) {
 func (s *tcpStatsdSink) connect(address string) error {
 	// TODO (CEV): parameterize timeout
 	conn, err := net.DialTimeout("tcp", address, defaultDialTimeout)
-	if err == nil {
-		s.conn = conn
+	if err != nil {
+		return err
+	}
+	s.conn = conn
+	if s.bw == nil {
+		w := &timeoutWriter{
+			timeout: defaultWriteTimeout,
+			conn:    conn,
+		}
+		// WARN: make the size tunable
+		s.bw = bufio.NewWriterSize(w, defaultBufferSize)
 	}
 	return err
 }
@@ -366,4 +392,25 @@ func (b *buffer) WriteUnit64(val uint64) {
 
 func (b *buffer) WriteFloat64(val float64) {
 	*b = strconv.AppendFloat(*b, val, 'f', 6, 64)
+}
+
+///////////////////////////////////////////////////////////////////////////////
+
+type timeoutWriter struct {
+	timeout time.Duration
+	conn    net.Conn
+	err     error
+}
+
+func (w *timeoutWriter) Write(b []byte) (int, error) {
+	if w.err != nil {
+		return 0, w.err
+	}
+	// CEV: ignore deadline errors as there is nothing we
+	// can do about them.
+	w.conn.SetWriteDeadline(time.Now().Add(w.timeout))
+	var n int
+	n, w.err = w.conn.Write(b)
+	w.conn.SetWriteDeadline(time.Time{})
+	return n, w.err
 }

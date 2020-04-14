@@ -980,9 +980,32 @@ func BenchmarkFlushCounter(b *testing.B) {
 	sink := tcpStatsdSink{
 		bufWriter: bufio.NewWriter(nopWriter{}),
 	}
+
+	const name = "TestCounter.___f=i.__tag1=v1"
+	const value = 12345
+	b.SetBytes(int64(len(fmt.Sprintf("%s:%d|n\n", name, value))))
+	b.ResetTimer()
+
 	for i := 0; i < b.N; i++ {
-		sink.FlushCounter("TestCounter.___f=i.__tag1=v1", uint64(i))
+		sink.FlushCounter(name, value)
 	}
+}
+
+func BenchmarkFlushCounter_Parallel(b *testing.B) {
+	sink := tcpStatsdSink{
+		bufWriter: bufio.NewWriter(nopWriter{}),
+	}
+
+	const name = "TestCounter.___f=i.__tag1=v1"
+	const value = 12345
+	b.SetBytes(int64(len(fmt.Sprintf("%s:%d|n\n", name, value))))
+	b.ResetTimer()
+
+	b.RunParallel(func(pb *testing.PB) {
+		for pb.Next() {
+			sink.FlushCounter(name, value)
+		}
+	})
 }
 
 func BenchmarkFlushTimer(b *testing.B) {
