@@ -11,6 +11,8 @@ const (
 	DefaultUseStatsd = true
 	// DefaultStatsdHost is the default address where statsd is running at.
 	DefaultStatsdHost = "localhost"
+	// DefaultStatsdProtocol is TCP
+	DefaultStatsdProtocol = "tcp"
 	// DefaultStatsdPort is the default port where statsd is listening at.
 	DefaultStatsdPort = 8125
 	// DefaultFlushIntervalS is the default flushing interval in seconds.
@@ -24,6 +26,8 @@ type Settings struct {
 	UseStatsd bool `envconfig:"USE_STATSD" default:"true"`
 	// Address where statsd is running at.
 	StatsdHost string `envconfig:"STATSD_HOST" default:"localhost"`
+	// Network protocol used to connect to statsd
+	StatsdProtocol string `envconfig:"STATSD_PROTOCOL" default:"tcp"`
 	// Port where statsd is listening at.
 	StatsdPort int `envconfig:"STATSD_PORT" default:"8125"`
 	// Flushing interval.
@@ -90,6 +94,7 @@ func GetSettings() Settings {
 	return Settings{
 		UseStatsd:      useStatsd,
 		StatsdHost:     envOr("STATSD_HOST", DefaultStatsdHost),
+		StatsdProtocol: envOr("STATSD_PROTOCOL", DefaultStatsdProtocol),
 		StatsdPort:     statsdPort,
 		FlushIntervalS: flushIntervalS,
 	}

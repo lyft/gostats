@@ -41,6 +41,7 @@ func TestSettingsCompat(t *testing.T) {
 	reset := testSetenv(t,
 		"USE_STATSD", "",
 		"STATSD_HOST", "",
+		"STATSD_PROTOCOL", "",
 		"STATSD_PORT", "",
 		"GOSTATS_FLUSH_INTERVAL_SECONDS", "",
 	)
@@ -61,6 +62,7 @@ func TestSettingsDefault(t *testing.T) {
 	reset := testSetenv(t,
 		"USE_STATSD", "",
 		"STATSD_HOST", "",
+		"STATSD_PROTOCOL", "",
 		"STATSD_PORT", "",
 		"GOSTATS_FLUSH_INTERVAL_SECONDS", "",
 	)
@@ -68,6 +70,7 @@ func TestSettingsDefault(t *testing.T) {
 	exp := Settings{
 		UseStatsd:      DefaultUseStatsd,
 		StatsdHost:     DefaultStatsdHost,
+		StatsdProtocol: DefaultStatsdProtocol,
 		StatsdPort:     DefaultStatsdPort,
 		FlushIntervalS: DefaultFlushIntervalS,
 	}
@@ -81,6 +84,7 @@ func TestSettingsOverride(t *testing.T) {
 	reset := testSetenv(t,
 		"USE_STATSD", "true",
 		"STATSD_HOST", "10.0.0.1",
+		"STATSD_PROTOCOL", "udp",
 		"STATSD_PORT", "1234",
 		"GOSTATS_FLUSH_INTERVAL_SECONDS", "3",
 	)
@@ -88,6 +92,7 @@ func TestSettingsOverride(t *testing.T) {
 	exp := Settings{
 		UseStatsd:      true,
 		StatsdHost:     "10.0.0.1",
+		StatsdProtocol: "udp",
 		StatsdPort:     1234,
 		FlushIntervalS: 3,
 	}

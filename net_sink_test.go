@@ -2,7 +2,6 @@ package stats
 
 import (
 	"bufio"
-	"bytes"
 	"context"
 	"fmt"
 	"io"
@@ -368,7 +367,7 @@ func TestStatGenerator(t *testing.T) {
 	}
 }
 
-func TestTCPStatsdSink_Flush(t *testing.T) {
+func TestNetSink_Flush(t *testing.T) {
 	// This test will generate a lot of "statsd channel full" errors
 	// so silence the logger.  This also means that this test cannot
 	// be ran in parallel.
@@ -490,8 +489,8 @@ func TestTCPStatsdSink_Flush(t *testing.T) {
 
 // Test that drainFlushQueue() does not hang when there are continuous
 // flush requests.
-func TestTCPStatsdSink_DrainFlushQueue(t *testing.T) {
-	s := &tcpStatsdSink{
+func TestNetSink_DrainFlushQueue(t *testing.T) {
+	s := &netSink{
 		doFlush: make(chan chan struct{}, 8),
 	}
 
@@ -549,199 +548,15 @@ func TestTCPStatsdSink_DrainFlushQueue(t *testing.T) {
 	}
 }
 
-type tcpTestSink struct {
-	ll    *net.TCPListener
-	addr  *net.TCPAddr
-	mu    sync.Mutex // buf lock
-	buf   bytes.Buffer
-	stats chan string
-	done  chan struct{} // closed when read loop exits
-}
-
-func newTCPTestSink(t testing.TB) *tcpTestSink {
-	l, err := net.ListenTCP("tcp", &net.TCPAddr{
-		IP:   net.IPv4(127, 0, 0, 1),
-		Port: 0,
-	})
-	if err != nil {
-		t.Fatal("ListenTCP:", err)
-	}
-	s := &tcpTestSink{
-		ll:    l,
-		addr:  l.Addr().(*net.TCPAddr),
-		stats: make(chan string, 64),
-		done:  make(chan struct{}),
-	}
-	go s.run(t)
-	return s
-}
-
-func (s *tcpTestSink) writeStat(line []byte) {
-	select {
-	case s.stats <- string(line):
-	default:
-	}
-	s.mu.Lock()
-	s.buf.Write(line)
-	s.mu.Unlock()
-}
-
-func (s *tcpTestSink) run(t testing.TB) {
-	defer close(s.done)
-	buf := bufio.NewReader(nil)
-	for {
-		conn, err := s.ll.AcceptTCP()
-		if err != nil {
-			// Log errors other than poll.ErrNetClosing, which is an
-			// internal error so we have to match against it's string.
-			if !strings.Contains(err.Error(), "use of closed network connection") {
-				t.Logf("Error: accept: %v", err)
-			}
-			return
-		}
-		// read stats line by line
-		buf.Reset(conn)
-		for {
-			b, e := buf.ReadBytes('\n')
-			if len(b) > 0 {
-				s.writeStat(b)
-			}
-			if e != nil {
-				if e != io.EOF {
-					err = e
-				}
-				break
-			}
-		}
-		if buf.Buffered() != 0 {
-			buf.WriteTo(&s.buf)
-		}
-		if err != nil {
-			t.Errorf("Error: reading stats: %v", err)
-		}
-	}
-}
-
-func (s *tcpTestSink) Restart(t testing.TB, resetBuffer bool) {
-	if err := s.Close(); err != nil {
-		if !strings.Contains(err.Error(), "use of closed network connection") {
-			t.Fatal(err)
-		}
-	}
-	select {
-	case <-s.done:
-		// Ok
-	case <-time.After(time.Second * 3):
-		t.Fatal("timeout waiting for run loop to exit")
-	}
-	l, err := net.ListenTCP(s.addr.Network(), s.addr)
-	if err != nil {
-		t.Fatalf("restarting connection: %v", err)
-	}
-	if resetBuffer {
-		s.buf.Reset()
-	}
-	*s = tcpTestSink{
-		ll:    l,
-		addr:  s.addr,
-		buf:   s.buf,
-		stats: make(chan string, 64),
-		done:  make(chan struct{}),
-	}
-	go s.run(t)
-}
-
-func (s *tcpTestSink) Close() error {
-	select {
-	case <-s.done:
-		return nil // closed
-	default:
-		return s.ll.Close()
-	}
-}
-
-func (s *tcpTestSink) WaitForStat(t testing.TB, timeout time.Duration) string {
-	t.Helper()
-	if timeout <= 0 {
-		timeout = defaultRetryInterval * 2
-	}
-	to := time.NewTimer(timeout)
-	defer to.Stop()
-	select {
-	case s := <-s.stats:
-		return s
-	case <-to.C:
-		t.Fatalf("timeout waiting to receive stat: %s", timeout)
-	}
-	return ""
-}
-
-func (s *tcpTestSink) Stats() <-chan string {
-	return s.stats
-}
-
-func (s *tcpTestSink) Bytes() []byte {
-	s.mu.Lock()
-	b := append([]byte(nil), s.buf.Bytes()...)
-	s.mu.Unlock()
-	return b
-}
-
-func (s *tcpTestSink) String() string {
-	s.mu.Lock()
-	str := s.buf.String()
-	s.mu.Unlock()
-	return str
-}
-
-func (s *tcpTestSink) Address() *net.TCPAddr {
-	return s.addr
-}
-
-func mergeEnv(extra ...string) []string {
-	var prefixes []string
-	for _, s := range extra {
-		n := strings.IndexByte(s, '=')
-		prefixes = append(prefixes, s[:n+1])
-	}
-	ignore := func(s string) bool {
-		for _, pfx := range prefixes {
-			if strings.HasPrefix(s, pfx) {
-				return true
-			}
-		}
-		return false
-	}
-
-	env := os.Environ()
-	a := env[:0]
-	for _, s := range env {
-		if !ignore(s) {
-			a = append(a, s)
-		}
-	}
-	return append(a, extra...)
-}
-
-// CommandEnv returns the environment variables for an *exec.Cmd to use
-// with this test sink.
-func (s *tcpTestSink) CommandEnv() []string {
-	return mergeEnv(
-		fmt.Sprintf("STATSD_PORT=%d", s.Address().Port),
-		fmt.Sprintf("STATSD_HOST=%s", s.Address().IP.String()),
-		"GOSTATS_FLUSH_INTERVAL_SECONDS=1",
-	)
-}
-
 func discardLogger() *logger.Logger {
 	log := logger.New()
 	log.Out = ioutil.Discard
 	return log
 }
 
-func TestTCPStatsdSink(t *testing.T) {
-	setup := func(t *testing.T, stop bool) (*tcpTestSink, *tcpStatsdSink) {
-		ts := newTCPTestSink(t)
+func testNetSink(t *testing.T, protocol string) {
+	setup := func(t *testing.T, stop bool) (*netTestSink, *netSink) {
+		ts := newNetTestSink(t, protocol)
 
 		if stop {
 			if err := ts.Close(); err != nil {
@@ -751,12 +566,28 @@ func TestTCPStatsdSink(t *testing.T) {
 
 		sink := NewTCPStatsdSink(
 			WithLogger(discardLogger()),
-			WithStatsdHost(ts.Address().IP.String()),
-			WithStatsdPort(ts.Address().Port),
-		).(*tcpStatsdSink)
+			WithStatsdHost(ts.Host(t)),
+			WithStatsdPort(ts.Port(t)),
+			WithStatsdProtocol(protocol),
+		).(*netSink)
 
 		return ts, sink
 	}
+
+	t.Run("BufferSize", func(t *testing.T) {
+		var size int
+		switch protocol {
+		case "udp":
+			size = defaultBufferSizeUDP
+		case "tcp":
+			size = defaultBufferSizeTCP
+		}
+		ts, sink := setup(t, false)
+		defer ts.Close()
+		if sink.bufWriter.Size() != size {
+			t.Errorf("Buffer Size: got: %d want: %d", sink.bufWriter.Size(), size)
+		}
+	})
 
 	t.Run("StatTypes", func(t *testing.T) {
 		var expected = [...]string{
@@ -812,7 +643,8 @@ func TestTCPStatsdSink(t *testing.T) {
 		if testing.Short() {
 			t.Skip("Skipping: short test")
 		}
-		t.Parallel()
+		// TODO: these are sometimes flaky when ran with t.Parallel() and
+		// the race detector enabled - fix this.
 
 		const expected = "counter:1|c\n"
 
@@ -853,7 +685,8 @@ func TestTCPStatsdSink(t *testing.T) {
 		if testing.Short() {
 			t.Skip("Skipping: short test")
 		}
-		t.Parallel()
+		// TODO: these are sometimes flaky when ran with t.Parallel() and
+		// the race detector enabled - fix this.
 
 		ts, sink := setup(t, true)
 		defer ts.Close()
@@ -888,6 +721,14 @@ func TestTCPStatsdSink(t *testing.T) {
 	})
 }
 
+func TestNetSink_UDP(t *testing.T) {
+	testNetSink(t, "udp")
+}
+
+func TestNetSink_TCP(t *testing.T) {
+	testNetSink(t, "tcp")
+}
+
 func buildBinary(t testing.TB, path string) (string, func()) {
 	var binaryName string
 	if strings.HasSuffix(path, ".go") {
@@ -915,7 +756,7 @@ func buildBinary(t testing.TB, path string) (string, func()) {
 	return output, cleanup
 }
 
-func TestTCPStatsdSink_Integration(t *testing.T) {
+func testNetSinkIntegration(t *testing.T, protocol string) {
 	t.Parallel()
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -926,11 +767,11 @@ func TestTCPStatsdSink_Integration(t *testing.T) {
 
 	// Test the stats of a fast exiting program are captured.
 	t.Run("FastExit", func(t *testing.T) {
-		ts := newTCPTestSink(t)
+		ts := newNetTestSink(t, protocol)
 		defer ts.Close()
 
 		cmd := exec.CommandContext(ctx, fastExitExe)
-		cmd.Env = ts.CommandEnv()
+		cmd.Env = ts.CommandEnv(t)
 
 		out, err := cmd.CombinedOutput()
 		if err != nil {
@@ -947,11 +788,11 @@ func TestTCPStatsdSink_Integration(t *testing.T) {
 
 	// Test that Flush() does not hang if the TCP sink is in a reconnect loop
 	t.Run("Reconnect", func(t *testing.T) {
-		ts := newTCPTestSink(t)
+		ts := newNetTestSink(t, protocol)
 		defer ts.Close()
 
 		cmd := exec.CommandContext(ctx, fastExitExe)
-		cmd.Env = ts.CommandEnv()
+		cmd.Env = ts.CommandEnv(t)
 
 		if err := cmd.Start(); err != nil {
 			t.Fatal(err)
@@ -970,6 +811,14 @@ func TestTCPStatsdSink_Integration(t *testing.T) {
 	})
 }
 
+func TestNetSink_Integration_TCP(t *testing.T) {
+	testNetSinkIntegration(t, "tcp")
+}
+
+func TestNetSink_Integration_UDP(t *testing.T) {
+	testNetSinkIntegration(t, "udp")
+}
+
 type nopWriter struct{}
 
 func (nopWriter) Write(b []byte) (int, error) {
@@ -977,7 +826,7 @@ func (nopWriter) Write(b []byte) (int, error) {
 }
 
 func BenchmarkFlushCounter(b *testing.B) {
-	sink := tcpStatsdSink{
+	sink := netSink{
 		bufWriter: bufio.NewWriter(nopWriter{}),
 	}
 	for i := 0; i < b.N; i++ {
@@ -986,7 +835,7 @@ func BenchmarkFlushCounter(b *testing.B) {
 }
 
 func BenchmarkFlushTimer(b *testing.B) {
-	sink := tcpStatsdSink{
+	sink := netSink{
 		bufWriter: bufio.NewWriter(nopWriter{}),
 	}
 	for i := 0; i < b.N; i++ {
