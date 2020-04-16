@@ -11,6 +11,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -368,12 +369,6 @@ func TestStatGenerator(t *testing.T) {
 }
 
 func TestNetSink_Flush(t *testing.T) {
-	// This test will generate a lot of "statsd channel full" errors
-	// so silence the logger.  This also means that this test cannot
-	// be ran in parallel.
-	logger.SetOutput(ioutil.Discard)
-	defer logger.SetOutput(os.Stderr)
-
 	lc, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatal(err)
@@ -385,19 +380,11 @@ func TestNetSink_Flush(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	oldPort, exists := os.LookupEnv("STATSD_PORT")
-	if exists {
-		defer os.Setenv("STATSD_PORT", oldPort)
-	} else {
-		defer os.Unsetenv("STATSD_PORT")
-	}
-	os.Setenv("STATSD_PORT", port)
-
 	go func() {
 		for {
 			conn, err := lc.Accept()
-			if conn != nil {
-				_, _ = io.Copy(ioutil.Discard, conn)
+			if err == nil {
+				_, err = io.Copy(ioutil.Discard, conn)
 			}
 			if err != nil {
 				return
@@ -405,7 +392,14 @@ func TestNetSink_Flush(t *testing.T) {
 		}
 	}()
 
-	sink := NewTCPStatsdSink()
+	nport, err := strconv.Atoi(port)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sink := NewNetSink(
+		WithLogger(discardLogger()),
+		WithStatsdPort(nport),
+	)
 
 	// Spin up a goroutine to flood the sink with large Counter stats.
 	// The goal here is to keep the buffer channel full.
