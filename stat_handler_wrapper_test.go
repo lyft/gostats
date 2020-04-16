@@ -3,14 +3,11 @@
 package stats
 
 import (
-	"fmt"
 	"net/http"
 	"testing"
 )
 
 func TestHTTPHandler_WrapResponse(t *testing.T) {
-	t.Parallel()
-
 	tests := []http.ResponseWriter{
 		struct {
 			http.ResponseWriter
@@ -98,28 +95,24 @@ func TestHTTPHandler_WrapResponse(t *testing.T) {
 
 	for i, test := range tests {
 		tc := test
-		t.Run(fmt.Sprint("test:", i), func(t *testing.T) {
-			t.Parallel()
+		_, canFlush := tc.(http.Flusher)
+		_, canHijack := tc.(http.Hijacker)
+		_, canPush := tc.(http.Pusher)
+		_, canNotify := tc.(http.CloseNotifier)
 
-			_, canFlush := tc.(http.Flusher)
-			_, canHijack := tc.(http.Hijacker)
-			_, canPush := tc.(http.Pusher)
-			_, canNotify := tc.(http.CloseNotifier)
+		rw := h.wrapResponse(tc)
 
-			rw := h.wrapResponse(tc)
-
-			if _, ok := rw.(http.Flusher); ok != canFlush {
-				t.Errorf("Flusher: wanted %t", canFlush)
-			}
-			if _, ok := rw.(http.Hijacker); ok != canHijack {
-				t.Errorf("Hijacker: wanted %t", canHijack)
-			}
-			if _, ok := rw.(http.Pusher); ok != canPush {
-				t.Errorf("Pusher: wanted %t", canPush)
-			}
-			if _, ok := rw.(http.CloseNotifier); ok != canNotify {
-				t.Errorf("CloseNotifier: wanted %t", canNotify)
-			}
-		})
+		if _, ok := rw.(http.Flusher); ok != canFlush {
+			t.Errorf("Test(%d): Flusher: wanted %t", i, canFlush)
+		}
+		if _, ok := rw.(http.Hijacker); ok != canHijack {
+			t.Errorf("Test(%d): Hijacker: wanted %t", i, canHijack)
+		}
+		if _, ok := rw.(http.Pusher); ok != canPush {
+			t.Errorf("Test(%d): Pusher: wanted %t", i, canPush)
+		}
+		if _, ok := rw.(http.CloseNotifier); ok != canNotify {
+			t.Errorf("Test(%d): CloseNotifier: wanted %t", i, canNotify)
+		}
 	}
 }
