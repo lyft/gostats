@@ -548,179 +548,222 @@ func discardLogger() *logger.Logger {
 	return log
 }
 
-func testNetSink(t *testing.T, protocol string) {
-	setup := func(t *testing.T, stop bool) (*netTestSink, *netSink) {
-		ts := newNetTestSink(t, protocol)
+func setupTestNetSink(t *testing.T, protocol string, stop bool) (*netTestSink, *netSink) {
+	ts := newNetTestSink(t, protocol)
 
-		if stop {
-			if err := ts.Close(); err != nil {
-				t.Fatal(err)
-			}
+	if stop {
+		if err := ts.Close(); err != nil {
+			t.Fatal(err)
 		}
-
-		sink := NewTCPStatsdSink(
-			WithLogger(discardLogger()),
-			WithStatsdHost(ts.Host(t)),
-			WithStatsdPort(ts.Port(t)),
-			WithStatsdProtocol(protocol),
-		).(*netSink)
-
-		return ts, sink
 	}
 
-	t.Run("BufferSize", func(t *testing.T) {
-		var size int
-		switch protocol {
-		case "udp":
-			size = defaultBufferSizeUDP
-		case "tcp":
-			size = defaultBufferSizeTCP
-		}
-		ts, sink := setup(t, false)
-		defer ts.Close()
-		if sink.bufWriter.Size() != size {
-			t.Errorf("Buffer Size: got: %d want: %d", sink.bufWriter.Size(), size)
-		}
-	})
+	sink := NewTCPStatsdSink(
+		WithLogger(discardLogger()),
+		WithStatsdHost(ts.Host(t)),
+		WithStatsdPort(ts.Port(t)),
+		WithStatsdProtocol(protocol),
+	).(*netSink)
 
-	t.Run("StatTypes", func(t *testing.T) {
-		var expected = [...]string{
-			"counter:1|c\n",
-			"gauge:1|g\n",
-			"timer_int:1|ms\n",
-			"timer_float:1.230000|ms\n",
-		}
+	return ts, sink
+}
 
-		ts, sink := setup(t, false)
-		defer ts.Close()
+func testNetSinkBufferSize(t *testing.T, protocol string) {
+	var size int
+	switch protocol {
+	case "udp":
+		size = defaultBufferSizeUDP
+	case "tcp":
+		size = defaultBufferSizeTCP
+	}
+	ts, sink := setupTestNetSink(t, protocol, false)
+	defer ts.Close()
+	if sink.bufWriter.Size() != size {
+		t.Errorf("Buffer Size: got: %d want: %d", sink.bufWriter.Size(), size)
+	}
+}
 
-		sink.FlushCounter("counter", 1)
-		sink.FlushGauge("gauge", 1)
-		sink.FlushTimer("timer_int", 1)
-		sink.FlushTimer("timer_float", 1.23)
-		sink.Flush()
+func testNetSinkStatTypes(t *testing.T, protocol string) {
+	var expected = [...]string{
+		"counter:1|c\n",
+		"gauge:1|g\n",
+		"timer_int:1|ms\n",
+		"timer_float:1.230000|ms\n",
+	}
 
-		for _, exp := range expected {
-			stat := ts.WaitForStat(t, time.Millisecond*50)
-			if stat != exp {
-				t.Errorf("stats got: %q want: %q", stat, exp)
-			}
-		}
+	ts, sink := setupTestNetSink(t, protocol, false)
+	defer ts.Close()
 
-		// make sure there aren't any extra stats we're missing
-		exp := strings.Join(expected[:], "")
-		buf := ts.String()
-		if buf != exp {
-			t.Errorf("stats buffer\ngot:\n%q\nwant:\n%q\n", buf, exp)
-		}
-	})
+	sink.FlushCounter("counter", 1)
+	sink.FlushGauge("gauge", 1)
+	sink.FlushTimer("timer_int", 1)
+	sink.FlushTimer("timer_float", 1.23)
+	sink.Flush()
 
-	// Make sure that stats are immediately flushed so that stats from fast
-	// exiting programs are not lost.
-	t.Run("ImmediateFlush", func(t *testing.T) {
-		const expected = "counter:1|c\n"
-
-		ts, sink := setup(t, false)
-		defer ts.Close()
-
-		sink.FlushCounter("counter", 1)
-		sink.Flush()
-
+	for _, exp := range expected {
 		stat := ts.WaitForStat(t, time.Millisecond*50)
-		if stat != expected {
-			t.Errorf("stats got: %q want: %q", stat, expected)
+		if stat != exp {
+			t.Errorf("stats got: %q want: %q", stat, exp)
 		}
-	})
+	}
 
-	// Test that we can successfully reconnect and flush a stat.
-	t.Run("Reconnect", func(t *testing.T) {
-		if testing.Short() {
-			t.Skip("Skipping: short test")
+	// make sure there aren't any extra stats we're missing
+	exp := strings.Join(expected[:], "")
+	buf := ts.String()
+	if buf != exp {
+		t.Errorf("stats buffer\ngot:\n%q\nwant:\n%q\n", buf, exp)
+	}
+}
+
+func testNetSinkImmediateFlush(t *testing.T, protocol string) {
+	const expected = "counter:1|c\n"
+
+	ts, sink := setupTestNetSink(t, protocol, false)
+	defer ts.Close()
+
+	sink.FlushCounter("counter", 1)
+	sink.Flush()
+
+	stat := ts.WaitForStat(t, time.Millisecond*50)
+	if stat != expected {
+		t.Errorf("stats got: %q want: %q", stat, expected)
+	}
+}
+
+// replaceFatalWithLog replaces calls to t.Fatalf() with t.Logf().
+type replaceFatalWithLog struct {
+	*testing.T
+}
+
+func (t replaceFatalWithLog) Fatalf(format string, args ...interface{}) {
+	t.Logf(format, args...)
+}
+
+func testNetSinkReconnect(t *testing.T, protocol string) {
+	if testing.Short() {
+		t.Skip("Skipping: short test")
+	}
+	t.Parallel()
+
+	const expected = "counter:1|c\n"
+
+	ts, sink := setupTestNetSink(t, protocol, true)
+	defer ts.Close()
+
+	sink.FlushCounter("counter", 1)
+
+	flushed := make(chan struct{})
+	go func() {
+		flushed <- struct{}{}
+		sink.Flush()
+		close(flushed)
+	}()
+
+	<-flushed // wait till we're ready
+	ts.Restart(t, true)
+
+	sink.FlushCounter("counter", 1)
+
+	// This test is flaky with UDP and the race detector, but good
+	// to have so we log instead of fail the test.
+	if protocol == "udp" {
+		stat := ts.WaitForStat(replaceFatalWithLog{t}, defaultRetryInterval*2)
+		if stat != "" && stat != expected {
+			t.Fatalf("stats got: %q want: %q", stat, expected)
 		}
-		// TODO: these are sometimes flaky when ran with t.Parallel() and
-		// the race detector enabled - fix this.
-
-		const expected = "counter:1|c\n"
-
-		ts, sink := setup(t, true)
-		defer ts.Close()
-
-		sink.FlushCounter("counter", 1)
-
-		flushed := make(chan struct{})
-		go func() {
-			flushed <- struct{}{}
-			sink.Flush()
-			close(flushed)
-		}()
-
-		<-flushed // wait till we're ready
-		ts.Restart(t, true)
-
+	} else {
 		stat := ts.WaitForStat(t, defaultRetryInterval*2)
 		if stat != expected {
 			t.Fatalf("stats got: %q want: %q", stat, expected)
 		}
+	}
 
-		// Make sure our flush call returned
-		select {
-		case <-flushed:
-		case <-time.After(time.Millisecond * 100):
-			// The flushed channel should be closed by this point,
-			// but this was failing in CI on go1.12 due to timing
-			// issues so we relax the constraint and give it 100ms.
-			t.Error("Flush() did not return")
-		}
-	})
-
-	// Test that when reconnecting fails, calls the Flush() do not block
-	// indefinitely.
-	t.Run("ReconnectFailure", func(t *testing.T) {
-		if testing.Short() {
-			t.Skip("Skipping: short test")
-		}
-		// TODO: these are sometimes flaky when ran with t.Parallel() and
-		// the race detector enabled - fix this.
-
-		ts, sink := setup(t, true)
-		defer ts.Close()
-
-		sink.FlushCounter("counter", 1)
-
-		const N = 16
-		flushCount := new(int64)
-		flushed := make(chan struct{})
-		go func() {
-			wg := new(sync.WaitGroup)
-			wg.Add(N)
-			for i := 0; i < N; i++ {
-				go func() {
-					sink.Flush()
-					atomic.AddInt64(flushCount, 1)
-					wg.Done()
-				}()
-			}
-			wg.Wait()
-			close(flushed)
-		}()
-
-		// Make sure our flush call returned
-		select {
-		case <-flushed:
-			// Ok
-		case <-time.After(defaultRetryInterval * 2):
-			t.Fatalf("Only %d of %d Flush() calls succeeded",
-				atomic.LoadInt64(flushCount), N)
-		}
-	})
+	// Make sure our flush call returned
+	select {
+	case <-flushed:
+	case <-time.After(time.Millisecond * 100):
+		// The flushed channel should be closed by this point,
+		// but this was failing in CI on go1.12 due to timing
+		// issues so we relax the constraint and give it 100ms.
+		t.Error("Flush() did not return")
+	}
 }
 
-func TestNetSink_UDP(t *testing.T) {
-	testNetSink(t, "udp")
+func testNetSinkReconnectFailure(t *testing.T, protocol string) {
+	if testing.Short() {
+		t.Skip("Skipping: short test")
+	}
+	t.Parallel()
+
+	ts, sink := setupTestNetSink(t, protocol, true)
+	defer ts.Close()
+
+	sink.FlushCounter("counter", 1)
+
+	const N = 16
+	flushCount := new(int64)
+	flushed := make(chan struct{})
+	go func() {
+		wg := new(sync.WaitGroup)
+		wg.Add(N)
+		for i := 0; i < N; i++ {
+			go func() {
+				sink.Flush()
+				atomic.AddInt64(flushCount, 1)
+				wg.Done()
+			}()
+		}
+		wg.Wait()
+		close(flushed)
+	}()
+
+	// Make sure our flush call returned
+	select {
+	case <-flushed:
+		// Ok
+	case <-time.After(defaultRetryInterval * 2):
+		t.Fatalf("Only %d of %d Flush() calls succeeded",
+			atomic.LoadInt64(flushCount), N)
+	}
 }
 
-func TestNetSink_TCP(t *testing.T) {
-	testNetSink(t, "tcp")
+func TestNetSink_BufferSize_TCP(t *testing.T) {
+	testNetSinkBufferSize(t, "tcp")
+}
+
+func TestNetSink_BufferSize_UDP(t *testing.T) {
+	testNetSinkBufferSize(t, "udp")
+}
+
+func TestNetSink_StatTypes_TCP(t *testing.T) {
+	testNetSinkStatTypes(t, "tcp")
+}
+
+func TestNetSink_StatTypes_UDP(t *testing.T) {
+	testNetSinkStatTypes(t, "udp")
+}
+
+func TestNetSink_ImmediateFlush_TCP(t *testing.T) {
+	testNetSinkImmediateFlush(t, "tcp")
+}
+
+func TestNetSink_ImmediateFlush_UDP(t *testing.T) {
+	testNetSinkImmediateFlush(t, "udp")
+}
+
+func TestNetSink_Reconnect_TCP(t *testing.T) {
+	testNetSinkReconnect(t, "tcp")
+}
+
+func TestNetSink_Reconnect_UDP(t *testing.T) {
+	testNetSinkReconnect(t, "udp")
+}
+
+func TestNetSink_ReconnectFailure_TCP(t *testing.T) {
+	testNetSinkReconnectFailure(t, "tcp")
+}
+
+func TestNetSink_ReconnectFailure_UDP(t *testing.T) {
+	testNetSinkReconnectFailure(t, "udp")
 }
 
 func buildBinary(t testing.TB, path string) (string, func()) {
