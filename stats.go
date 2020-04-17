@@ -188,10 +188,10 @@ func NewDefaultStore() Store {
 	settings := GetSettings()
 	if !settings.UseStatsd {
 		logger.Warn("statsd is not in use")
-		if settings.LoggingSinkEnabled {
-			newStore = NewStore(NewLoggingSink(), false)
-		} else {
+		if settings.LoggingSinkDisabled {
 			newStore = NewStore(NewNullSink(), false)
+		} else {
+			newStore = NewStore(NewLoggingSink(), false)
 		}
 		go newStore.Start(time.NewTicker(10 * time.Second))
 	} else {
