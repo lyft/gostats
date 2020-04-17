@@ -34,7 +34,8 @@ type Settings struct {
 	StatsdPort int `envconfig:"STATSD_PORT" default:"8125"`
 	// Flushing interval.
 	FlushIntervalS int `envconfig:"GOSTATS_FLUSH_INTERVAL_SECONDS" default:"5"`
-	// Whether a LoggingSink should be used is Statsd is not enabled.
+	// Disable the LoggingSink when USE_STATSD is false and use the NullSink instead.
+	// This will cause all stats to be silently dropped.
 	LoggingSinkDisabled bool `envconfig:"GOSTATS_LOGGING_SINK_DISABLED" default:"false"`
 }
 
