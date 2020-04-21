@@ -2,11 +2,8 @@ package stats
 
 import (
 	"bufio"
-	"bytes"
-	"fmt"
 	"net"
 	"strconv"
-	"sync"
 	"time"
 
 	"github.com/lyft/gostats/internal/bufferpool"
@@ -98,33 +95,12 @@ type tcpStatsdSink struct {
 	stats chan stat.Stat
 	bw    *bufio.Writer
 
-	// KILL THIS
-	// outc chan *bytes.Buffer
-
-	conn net.Conn
-	mu   sync.Mutex
-	// bufWriter    *bufio.Writer
+	conn         net.Conn
 	doFlush      chan chan struct{}
 	droppedBytes uint64
 	log          *logger.Logger
 	statsdHost   string
 	statsdPort   int
-}
-
-type sinkWriter struct {
-	outc chan<- *bytes.Buffer
-}
-
-func (w *sinkWriter) Write(p []byte) (int, error) {
-	n := len(p)
-	dest := getBuffer()
-	dest.Write(p)
-	select {
-	case w.outc <- dest:
-		return n, nil
-	default:
-		return 0, fmt.Errorf("statsd channel full, dropping stats buffer with %d bytes", n)
-	}
 }
 
 func (s *tcpStatsdSink) Flush() {
@@ -156,40 +132,20 @@ func (s *tcpStatsdSink) drainFlushQueue() {
 	}
 }
 
-// s.mu should be held
+// TODO: fix and duplicate this logging
 func (s *tcpStatsdSink) handleFlushErrorSize(err error, dropped int) {
-	d := uint64(dropped)
-	if (s.droppedBytes+d)%logOnEveryNDroppedBytes > s.droppedBytes%logOnEveryNDroppedBytes {
-		s.log.WithField("total_dropped_bytes", s.droppedBytes+d).
-			WithField("dropped_bytes", d).
-			Error(err)
-	}
-	s.droppedBytes += d
-
+	// d := uint64(dropped)
+	// if (s.droppedBytes+d)%logOnEveryNDroppedBytes > s.droppedBytes%logOnEveryNDroppedBytes {
+	// 	s.log.WithField("total_dropped_bytes", s.droppedBytes+d).
+	// 		WithField("dropped_bytes", d).
+	// 		Error(err)
+	// }
+	// s.droppedBytes += d
+	//
 	// s.bufWriter.Reset(&sinkWriter{
 	// 	outc: s.outc,
 	// })
 }
-
-// s.mu should be held
-// func (s *tcpStatsdSink) handleFlushError(err error) {
-// 	s.handleFlushErrorSize(err, s.bufWriter.Buffered())
-// }
-
-// func (s *tcpStatsdSink) writeBuffer(b *buffer) {
-// 	s.mu.Lock()
-// 	if s.bufWriter.Available() < b.Len() {
-// 		if err := s.bufWriter.Flush(); err != nil {
-// 			s.handleFlushError(err)
-// 		}
-// 		// If there is an error we reset the bufWriter so its
-// 		// okay to attempt the write after the failed flush.
-// 	}
-// 	if _, err := s.bufWriter.Write(*b); err != nil {
-// 		s.handleFlushError(err)
-// 	}
-// 	s.mu.Unlock()
-// }
 
 func (s *tcpStatsdSink) FlushCounter(name string, value uint64) {
 	s.stats <- stat.NewCounter(name, value)
@@ -278,25 +234,6 @@ func (s *tcpStatsdSink) run() {
 	}
 }
 
-// writeToConn writes the buffer to the underlying conn.  May only be called
-// from run().
-func (s *tcpStatsdSink) writeToConn(buf *bytes.Buffer) {
-	len := buf.Len()
-
-	// TODO (CEV): parameterize timeout
-	s.conn.SetWriteDeadline(time.Now().Add(defaultWriteTimeout))
-	_, err := buf.WriteTo(s.conn)
-	s.conn.SetWriteDeadline(time.Time{}) // clear
-
-	if err != nil {
-		s.mu.Lock()
-		s.handleFlushErrorSize(err, len)
-		s.mu.Unlock()
-		_ = s.conn.Close()
-		s.conn = nil // this will break the loop
-	}
-}
-
 func (s *tcpStatsdSink) connect(address string) error {
 	// CEV: this should never happen
 	if s.conn != nil {
@@ -320,21 +257,8 @@ func (s *tcpStatsdSink) connect(address string) error {
 	return nil
 }
 
-var bufferPool sync.Pool
-
-func getBuffer() *bytes.Buffer {
-	if v := bufferPool.Get(); v != nil {
-		b := v.(*bytes.Buffer)
-		b.Reset()
-		return b
-	}
-	return new(bytes.Buffer)
-}
-
-func putBuffer(b *bytes.Buffer) {
-	bufferPool.Put(b)
-}
-
+// TODO: remove this
+//
 // Use a fast and simple buffer for constructing statsd messages
 type buffer []byte
 
