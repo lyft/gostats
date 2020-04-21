@@ -18,6 +18,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/lyft/gostats/internal/stat"
 	logger "github.com/sirupsen/logrus"
 )
 
@@ -976,10 +977,19 @@ func (nopWriter) Write(b []byte) (int, error) {
 	return len(b), nil
 }
 
-func BenchmarkFlushCounter(b *testing.B) {
-	sink := tcpStatsdSink{
-		bufWriter: bufio.NewWriter(nopWriter{}),
+func setupBenchmark() *tcpStatsdSink {
+	sink := &tcpStatsdSink{
+		stats: make(chan stat.Stat, 512),
+		bw:    bufio.NewWriter(nopWriter{}),
+		log:   discardLogger(),
+		conn:  new(net.TCPConn), // dummy conn so that we don't attempt to connect
 	}
+	go sink.run()
+	return sink
+}
+
+func BenchmarkFlushCounter(b *testing.B) {
+	sink := setupBenchmark()
 
 	const name = "TestCounter.___f=i.__tag1=v1"
 	const value = 12345
@@ -992,9 +1002,7 @@ func BenchmarkFlushCounter(b *testing.B) {
 }
 
 func BenchmarkFlushCounter_Parallel(b *testing.B) {
-	sink := tcpStatsdSink{
-		bufWriter: bufio.NewWriter(nopWriter{}),
-	}
+	sink := setupBenchmark()
 
 	const name = "TestCounter.___f=i.__tag1=v1"
 	const value = 12345
@@ -1009,10 +1017,15 @@ func BenchmarkFlushCounter_Parallel(b *testing.B) {
 }
 
 func BenchmarkFlushTimer(b *testing.B) {
-	sink := tcpStatsdSink{
-		bufWriter: bufio.NewWriter(nopWriter{}),
-	}
+	sink := setupBenchmark()
+
+	// This is an estimate
+	const name = "TestTImer.___f=i.__tag1=v1"
+	const value = 12345
+	b.SetBytes(int64(len(fmt.Sprintf("%s:%d|n\n", name, value))))
+	b.ResetTimer()
+
 	for i := 0; i < b.N; i++ {
-		sink.FlushTimer("TestTImer.___f=i.__tag1=v1", float64(i)/3)
+		sink.FlushTimer(name, float64(i)/3)
 	}
 }

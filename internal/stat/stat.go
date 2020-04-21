@@ -48,6 +48,18 @@ type Stat struct {
 	Value uint64
 }
 
+func NewCounter(name string, value uint64) Stat {
+	return Stat{Type: CounterStat, Name: name, Value: value}
+}
+
+func NewGauge(name string, value uint64) Stat {
+	return Stat{Type: GaugeStat, Name: name, Value: value}
+}
+
+func NewTimer(name string, value float64) Stat {
+	return Stat{Type: TimerStat, Name: name, Value: math.Float64bits(value)}
+}
+
 func (s Stat) valid() bool {
 	return CounterStat <= s.Type && s.Type <= TimerStat
 }
