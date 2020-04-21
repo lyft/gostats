@@ -206,11 +206,29 @@ func (s *tcpStatsdSink) run() {
 				s.conn = nil
 			}
 
-		case stat := <-s.stats:
-			if err := s.writeStat(stat); err != nil {
+		case st := <-s.stats:
+			if err := s.writeStat(st); err != nil {
 				// WARN: log error
 				_ = s.conn.Close()
 				s.conn = nil
+				break // select statement
+			}
+			// WARN: see if there are any more stats we can write
+			//
+			// The limit of 64 was chosen since it performs well in
+			// benchmarks.
+			n := len(s.stats)
+			if n > 64 {
+				n = 64
+			}
+			for i := 0; i < n; i++ {
+				st := <-s.stats
+				if err := s.writeStat(st); err != nil {
+					// WARN: log error
+					_ = s.conn.Close()
+					s.conn = nil
+					break // loop
+				}
 			}
 
 		case done := <-s.doFlush:
