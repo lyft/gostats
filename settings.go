@@ -17,6 +17,8 @@ const (
 	DefaultStatsdPort = 8125
 	// DefaultFlushIntervalS is the default flushing interval in seconds.
 	DefaultFlushIntervalS = 5
+	// DefaultLoggingSinkDisabled is the default behavior of logging sink suppression, default is false.
+	DefaultLoggingSinkDisabled = false
 )
 
 // The Settings type is used to configure gostats. gostats uses environment
@@ -32,6 +34,9 @@ type Settings struct {
 	StatsdPort int `envconfig:"STATSD_PORT" default:"8125"`
 	// Flushing interval.
 	FlushIntervalS int `envconfig:"GOSTATS_FLUSH_INTERVAL_SECONDS" default:"5"`
+	// Disable the LoggingSink when USE_STATSD is false and use the NullSink instead.
+	// This will cause all stats to be silently dropped.
+	LoggingSinkDisabled bool `envconfig:"GOSTATS_LOGGING_SINK_DISABLED" default:"false"`
 }
 
 // An envError is an error that occured parsing an environment variable
@@ -91,11 +96,16 @@ func GetSettings() Settings {
 	if err != nil {
 		panic(err)
 	}
+	loggingSinkDisabled, err := envBool("GOSTATS_LOGGING_SINK_DISABLED", DefaultLoggingSinkDisabled)
+	if err != nil {
+		panic(err)
+	}
 	return Settings{
-		UseStatsd:      useStatsd,
-		StatsdHost:     envOr("STATSD_HOST", DefaultStatsdHost),
-		StatsdProtocol: envOr("STATSD_PROTOCOL", DefaultStatsdProtocol),
-		StatsdPort:     statsdPort,
-		FlushIntervalS: flushIntervalS,
+		UseStatsd:           useStatsd,
+		StatsdHost:          envOr("STATSD_HOST", DefaultStatsdHost),
+		StatsdProtocol:      envOr("STATSD_PROTOCOL", DefaultStatsdProtocol),
+		StatsdPort:          statsdPort,
+		FlushIntervalS:      flushIntervalS,
+		LoggingSinkDisabled: loggingSinkDisabled,
 	}
 }

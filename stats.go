@@ -188,7 +188,11 @@ func NewDefaultStore() Store {
 	settings := GetSettings()
 	if !settings.UseStatsd {
 		logger.Warn("statsd is not in use")
-		newStore = NewStore(NewLoggingSink(), false)
+		if settings.LoggingSinkDisabled {
+			newStore = NewStore(NewNullSink(), false)
+		} else {
+			newStore = NewStore(NewLoggingSink(), false)
+		}
 		go newStore.Start(time.NewTicker(10 * time.Second))
 	} else {
 		newStore = NewStore(NewTCPStatsdSink(), false)
