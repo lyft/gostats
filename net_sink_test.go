@@ -318,7 +318,7 @@ func TestScopesWithTags(t *testing.T) {
 
 	expected := "a.b.d.t.__x=b.__y=a.__z=b:1.000000|ms\na.b.d.c.__x=b.__y=a.__z=b:1|c\na.b.d.g.__x=b.__y=a.__z=b:1|g\n"
 	if expected != sink.record {
-		t.Errorf("Expected: '%s' Got: '%s'", expected, sink.record)
+		t.Errorf("\n# Expected:\n%s\n# Got:\n%s\n", expected, sink.record)
 	}
 }
 
@@ -338,7 +338,7 @@ func TestScopesAndMetricsWithTags(t *testing.T) {
 
 	expected := "a.b.t.__x=m.__y=a.__z=m:1.000000|ms\na.b.c.__x=m.__y=a.__z=m:1|c\na.b.g.__x=m.__y=a.__z=m:1|g\n"
 	if expected != sink.record {
-		t.Errorf("Expected: '%s' Got: '%s'", expected, sink.record)
+		t.Errorf("\n# Expected:\n%s\n# Got:\n%s\n", expected, sink.record)
 	}
 }
 

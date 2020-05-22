@@ -354,27 +354,34 @@ func (s *statStore) Store() Store {
 }
 
 func (s *statStore) Scope(name string) Scope {
-	return s.ScopeWithTags(name, nil)
+	return newSubScope(s, name, nil)
 }
 
 func (s *statStore) ScopeWithTags(name string, tags map[string]string) Scope {
-	return subScope{registry: s, name: name, tags: tags}
+	return newSubScope(s, name, tags)
 }
 
-func (s *statStore) NewCounter(name string) Counter {
-	return s.NewCounterWithTags(name, nil)
-}
-
-func (s *statStore) NewCounterWithTags(name string, tags map[string]string) Counter {
-	name = serializeTags(name, tags)
-	if v, ok := s.counters.Load(name); ok {
+func (s *statStore) newCounter(serializedName string) *counter {
+	if v, ok := s.counters.Load(serializedName); ok {
 		return v.(*counter)
 	}
 	c := new(counter)
-	if v, loaded := s.counters.LoadOrStore(name, c); loaded {
-		c = v.(*counter)
+	if v, loaded := s.counters.LoadOrStore(serializedName, c); loaded {
+		return v.(*counter)
 	}
 	return c
+}
+
+func (s *statStore) NewCounter(name string) Counter {
+	return s.newCounter(name)
+}
+
+func (s *statStore) NewCounterWithTags(name string, tags map[string]string) Counter {
+	return s.newCounter(serializeTags(name, tags))
+}
+
+func (s *statStore) newCounterWithTagSet(name string, tags tagSet) Counter {
+	return s.newCounter(serializeTagSet(name, tags))
 }
 
 var emptyPerInstanceTags = map[string]string{"_f": "i"}
@@ -391,20 +398,40 @@ func (s *statStore) NewPerInstanceCounter(name string, tags map[string]string) C
 	return s.NewCounterWithTags(name, tags)
 }
 
-func (s *statStore) NewGauge(name string) Gauge {
-	return s.NewGaugeWithTags(name, nil)
+type statCache struct {
+	cache sync.Map
+	new   func() interface{}
 }
 
-func (s *statStore) NewGaugeWithTags(name string, tags map[string]string) Gauge {
-	name = serializeTags(name, tags)
-	if v, ok := s.gauges.Load(name); ok {
+func (s *statCache) LoadOrCreate(key string) interface{} {
+	if v, ok := s.cache.Load(key); ok {
+		return v
+	}
+	v, _ := s.cache.LoadOrStore(key, s.new())
+	return v
+}
+
+func (s *statStore) newGauge(serializedName string) *gauge {
+	if v, ok := s.gauges.Load(serializedName); ok {
 		return v.(*gauge)
 	}
 	g := new(gauge)
-	if v, loaded := s.gauges.LoadOrStore(name, g); loaded {
-		g = v.(*gauge)
+	if v, loaded := s.gauges.LoadOrStore(serializedName, g); loaded {
+		return v.(*gauge)
 	}
 	return g
+}
+
+func (s *statStore) NewGauge(name string) Gauge {
+	return s.newGauge(name)
+}
+
+func (s *statStore) NewGaugeWithTags(name string, tags map[string]string) Gauge {
+	return s.newGauge(serializeTags(name, tags))
+}
+
+func (s *statStore) newGaugeWithTagSet(name string, tags tagSet) Gauge {
+	return s.newGauge(serializeTagSet(name, tags))
 }
 
 func (s *statStore) NewPerInstanceGauge(name string, tags map[string]string) Gauge {
@@ -419,20 +446,27 @@ func (s *statStore) NewPerInstanceGauge(name string, tags map[string]string) Gau
 	return s.NewGaugeWithTags(name, tags)
 }
 
+func (s *statStore) newTimer(serializedName string) *timer {
+	if v, ok := s.timers.Load(serializedName); ok {
+		return v.(*timer)
+	}
+	t := &timer{name: serializedName, sink: s.sink}
+	if v, loaded := s.timers.LoadOrStore(serializedName, t); loaded {
+		return v.(*timer)
+	}
+	return t
+}
+
 func (s *statStore) NewTimer(name string) Timer {
-	return s.NewTimerWithTags(name, nil)
+	return s.newTimer(name)
 }
 
 func (s *statStore) NewTimerWithTags(name string, tags map[string]string) Timer {
-	name = serializeTags(name, tags)
-	if v, ok := s.timers.Load(name); ok {
-		return v.(*timer)
-	}
-	t := &timer{name: name, sink: s.sink}
-	if v, loaded := s.timers.LoadOrStore(name, t); loaded {
-		t = v.(*timer)
-	}
-	return t
+	return s.newTimer(serializeTags(name, tags))
+}
+
+func (s *statStore) newTimerWithTagSet(name string, tags tagSet) Timer {
+	return s.newTimer(serializeTagSet(name, tags))
 }
 
 func (s *statStore) NewPerInstanceTimer(name string, tags map[string]string) Timer {
@@ -450,74 +484,169 @@ func (s *statStore) NewPerInstanceTimer(name string, tags map[string]string) Tim
 type subScope struct {
 	registry *statStore
 	name     string
-	tags     map[string]string
+	tags     tagSet // read-only and may be shared by multiple subScopes
 }
 
-func (s subScope) Scope(name string) Scope {
+func newSubScope(registry *statStore, name string, tags map[string]string) *subScope {
+	a := make(tagSet, 0, len(tags))
+	for k, v := range tags {
+		if k != "" && v != "" {
+			a = append(a, tagPair{key: k, value: replaceChars(v)})
+		}
+	}
+	a.Sort()
+	return &subScope{registry: registry, name: name, tags: a}
+}
+
+func (s *subScope) Scope(name string) Scope {
 	return s.ScopeWithTags(name, nil)
 }
 
-func (s subScope) ScopeWithTags(name string, tags map[string]string) Scope {
-	return &subScope{registry: s.registry, name: joinScopes(s.name, name), tags: s.mergeTags(tags)}
+func (s *subScope) ScopeWithTags(name string, tags map[string]string) Scope {
+	return &subScope{
+		registry: s.registry,
+		name:     joinScopes(s.name, name),
+		tags:     s.mergeTags(tags),
+	}
 }
 
-func (s subScope) Store() Store {
+func (s *subScope) Store() Store {
 	return s.registry
 }
 
-func (s subScope) NewCounter(name string) Counter {
+func (s *subScope) NewCounter(name string) Counter {
 	return s.NewCounterWithTags(name, nil)
 }
 
-func (s subScope) NewCounterWithTags(name string, tags map[string]string) Counter {
-	return s.registry.NewCounterWithTags(joinScopes(s.name, name), s.mergeTags(tags))
+func (s *subScope) NewCounterWithTags(name string, tags map[string]string) Counter {
+	return s.registry.newCounterWithTagSet(joinScopes(s.name, name), s.mergeTags(tags))
 }
 
-func (s subScope) NewPerInstanceCounter(name string, tags map[string]string) Counter {
-	return s.registry.NewPerInstanceCounter(joinScopes(s.name, name), s.mergeTags(tags))
+func (s *subScope) NewPerInstanceCounter(name string, tags map[string]string) Counter {
+	return s.registry.newCounterWithTagSet(joinScopes(s.name, name),
+		s.mergePerInstanceTags(tags))
 }
 
-func (s subScope) NewGauge(name string) Gauge {
+func (s *subScope) NewGauge(name string) Gauge {
 	return s.NewGaugeWithTags(name, nil)
 }
 
-func (s subScope) NewGaugeWithTags(name string, tags map[string]string) Gauge {
-	return s.registry.NewGaugeWithTags(joinScopes(s.name, name), s.mergeTags(tags))
+func (s *subScope) NewGaugeWithTags(name string, tags map[string]string) Gauge {
+	return s.registry.newGaugeWithTagSet(joinScopes(s.name, name), s.mergeTags(tags))
 }
 
-func (s subScope) NewPerInstanceGauge(name string, tags map[string]string) Gauge {
-	return s.registry.NewPerInstanceGauge(joinScopes(s.name, name), s.mergeTags(tags))
+func (s *subScope) NewPerInstanceGauge(name string, tags map[string]string) Gauge {
+	return s.registry.newGaugeWithTagSet(joinScopes(s.name, name),
+		s.mergePerInstanceTags(tags))
 }
 
-func (s subScope) NewTimer(name string) Timer {
+func (s *subScope) NewTimer(name string) Timer {
 	return s.NewTimerWithTags(name, nil)
 }
 
-func (s subScope) NewTimerWithTags(name string, tags map[string]string) Timer {
-	return s.registry.NewTimerWithTags(joinScopes(s.name, name), s.mergeTags(tags))
+func (s *subScope) NewTimerWithTags(name string, tags map[string]string) Timer {
+	return s.registry.newTimerWithTagSet(joinScopes(s.name, name), s.mergeTags(tags))
 }
 
-func (s subScope) NewPerInstanceTimer(name string, tags map[string]string) Timer {
-	return s.registry.NewPerInstanceTimer(joinScopes(s.name, name), s.mergeTags(tags))
+func (s *subScope) NewPerInstanceTimer(name string, tags map[string]string) Timer {
+	return s.registry.newTimerWithTagSet(joinScopes(s.name, name),
+		s.mergePerInstanceTags(tags))
 }
 
 func joinScopes(parent, child string) string {
 	return parent + "." + child
 }
 
-// mergeTags augments tags with all scope-level tags that are not already present.
-// Modifies and returns tags directly.
-func (s subScope) mergeTags(tags map[string]string) map[string]string {
-	if len(s.tags) == 0 {
-		return tags
+// mergeOneTag is an optimized for inserting 1 tag and will panic otherwise.
+func (s *subScope) mergeOneTag(tags map[string]string) tagSet {
+	if len(tags) != 1 {
+		panic("invalid usage")
 	}
-	if len(tags) == 0 {
+	var p tagPair
+	for k, v := range tags {
+		p = tagPair{key: k, value: replaceChars(v)}
+		break
+	}
+	if p.key == "" || p.value == "" {
 		return s.tags
 	}
-	for k, v := range s.tags {
-		if _, ok := tags[k]; !ok {
-			tags[k] = v
+	a := make(tagSet, len(s.tags), len(s.tags)+1)
+	copy(a, s.tags)
+	return a.Insert(p)
+}
+
+// mergeTags returns a tagSet that is the union of subScope's tags and the
+// provided tags map. If any keys overlap the values from the provided map
+// are used.
+func (s *subScope) mergeTags(tags map[string]string) tagSet {
+	switch len(tags) {
+	case 0:
+		return s.tags
+	case 1:
+		// optimize for the common case of there only being one tag
+		return s.mergeOneTag(tags)
+	default:
+		// write tags to the end of the scratch slice
+		scratch := make(tagSet, len(s.tags)+len(tags))
+		a := scratch[len(s.tags):]
+		i := 0
+		for k, v := range tags {
+			if k != "" && v != "" {
+				a[i] = tagPair{key: k, value: replaceChars(v)}
+				i++
+			}
+		}
+		a = a[:i]
+		a.Sort()
+
+		if len(s.tags) == 0 {
+			return a
+		}
+		return mergeTagSets(s.tags, a, scratch)
+	}
+}
+
+// mergePerInstanceTags returns a tagSet that is the union of subScope's
+// tags and the provided tags map with. If any keys overlap the values from
+// the provided map are used.
+//
+// The returned tagSet will have a per-instance key ("_f") and if neither the
+// subScope or tags have this key it's value will be the default per-instance
+// value ("i").
+//
+// The method does not optimize for the case where there is only one tag
+// because it is used less frequently.
+func (s *subScope) mergePerInstanceTags(tags map[string]string) tagSet {
+	if len(tags) == 0 {
+		if s.tags.Contains("_f") {
+			return s.tags
+		}
+		// create copy with the per-instance tag
+		a := make(tagSet, len(s.tags), len(s.tags)+1)
+		copy(a, s.tags)
+		return a.Insert(tagPair{key: "_f", value: "i"})
+	}
+
+	// write tags to the end of scratch slice
+	scratch := make(tagSet, len(s.tags)+len(tags)+1)
+	a := scratch[len(s.tags):]
+	i := 0
+	for k, v := range tags {
+		if k != "" && v != "" {
+			a[i] = tagPair{key: k, value: replaceChars(v)}
+			i++
 		}
 	}
-	return tags
+	// add the default per-instance tag if not present
+	if tags["_f"] == "" && !s.tags.Contains("_f") {
+		a[i] = tagPair{key: "_f", value: "i"}
+		i++
+	}
+	a = a[:i]
+	a.Sort()
+
+	if len(s.tags) == 0 {
+		return a
+	}
+	return mergeTagSets(s.tags, a, scratch)
 }
