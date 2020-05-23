@@ -176,7 +176,7 @@ func mergeTagSets(s1, s2, scratch tagSet) tagSet {
 }
 
 func serializeTagSet(name string, set tagSet) string {
-	// NB: the tagSet must being sorted and have clean values
+	// NB: the tagSet must be sorted and have clean values
 
 	const prefix = ".__"
 	const sep = "="
