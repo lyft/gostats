@@ -328,5 +328,5 @@ func replaceChars(s string) string {
 	if buf == nil {
 		return s
 	}
-	return string(buf)
+	return *(*string)(unsafe.Pointer(&buf))
 }
