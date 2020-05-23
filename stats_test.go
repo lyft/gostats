@@ -107,11 +107,6 @@ func tagMapsEqual(m1, m2 map[string]string) bool {
 			return false
 		}
 	}
-	for k, v := range m2 {
-		if vv, ok := m1[k]; !ok || vv != v {
-			return false
-		}
-	}
 	return true
 }
 
