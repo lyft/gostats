@@ -498,3 +498,30 @@ func BenchmarkMergeTagSets(b *testing.B) {
 		}
 	})
 }
+
+func BenchmarkTagSetSearch_Reference(b *testing.B) {
+	var keys [5]string
+	tags := randomTagSet(b, "v_", len(keys))
+	for i := 0; i < len(tags); i++ {
+		keys[i] = tags[i].key
+	}
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		key := keys[i%len(keys)]
+		sort.Search(len(tags), func(i int) bool {
+			return tags[i].key >= key
+		})
+	}
+}
+
+func BenchmarkTagSetSearch(b *testing.B) {
+	var keys [5]string
+	tags := randomTagSet(b, "v_", len(keys))
+	for i := 0; i < len(tags); i++ {
+		keys[i] = tags[i].key
+	}
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		tags.Search(keys[i%len(keys)])
+	}
+}
