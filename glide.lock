@@ -1,17 +1,15 @@
-hash: 5f6a20dfcbd0d3f8669061128596d7b554934928a05f38a7e8d385c9c78b82d8
-updated: 2020-02-08T01:01:00.237797-05:00
+hash: f1e7fa29ed50869de12ef4e5fb6bd7756f141b14c63026d26290f9d51c4f46f4
+updated: 2020-05-27T17:40:57.342681-04:00
 imports:
+- name: github.com/konsorten/go-windows-terminal-sequences
+  version: edb144dfd453055e1e49a3d8b410a660b5a87613
 - name: github.com/sirupsen/logrus
-  version: 3e01752db0189b9157070a0e1668a620f9a85da2
-- name: golang.org/x/crypto
-  version: c9f3fb736b729628ec1e9c1a6b4313e883f452f9
-  subpackages:
-  - ssh/terminal
+  version: 60c74ad9be0d874af0ab0daef6ab07c5c5911f0d
 - name: golang.org/x/sys
-  version: d101bd2416d505c0448a6ce8a282482678040a89
+  version: 05986578812163b26672dabd9b425240ae2bb0ad
   subpackages:
+  - internal/unsafeheader
   - unix
-  - windows
 testImports:
 - name: github.com/kelseyhightower/envconfig
   version: 0b417c4ec4a8a82eecc22a1459a504aa55163d61
