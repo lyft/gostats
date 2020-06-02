@@ -37,10 +37,23 @@ func serializeTagsReference(name string, tags map[string]string) string {
 }
 
 func TestSerializeTags(t *testing.T) {
+	s := &statStore{sink: NewNullSink()}
 	const name = "prefix"
 	const expected = name + ".__q=r.__zzz=hello"
 	tags := map[string]string{"zzz": "hello", "q": "r"}
-	serialized := serializeTags(name, tags)
+	serialized := s.serializeTags(name, tags)
+	if serialized != expected {
+		t.Errorf("Serialized output (%s) didn't match expected output: %s",
+			serialized, expected)
+	}
+}
+
+func TestSerializeTagsCustomSeparator(t *testing.T) {
+	s := &statStore{sink: NewNullSink(), tagPrefix: "._t_", tagSeparator: "."}
+	const name = "prefix"
+	const expected = name + "._t_q.r._t_zzz.hello"
+	tags := map[string]string{"zzz": "hello", "q": "r"}
+	serialized := s.serializeTags(name, tags)
 	if serialized != expected {
 		t.Errorf("Serialized output (%s) didn't match expected output: %s",
 			serialized, expected)
@@ -50,6 +63,7 @@ func TestSerializeTags(t *testing.T) {
 // Test that the optimized serializeTags() function matches the reference
 // implementation.
 func TestSerializeTagsReference(t *testing.T) {
+	s := &statStore{sink: NewNullSink()}
 	const name = "prefix"
 	makeTags := func(n int) map[string]string {
 		m := make(map[string]string, n)
@@ -63,7 +77,7 @@ func TestSerializeTagsReference(t *testing.T) {
 	for i := 0; i < 100; i++ {
 		tags := makeTags(i)
 		expected := serializeTagsReference(name, tags)
-		serialized := serializeTags(name, tags)
+		serialized := s.serializeTags(name, tags)
 		if serialized != expected {
 			t.Errorf("%d Serialized output (%s) didn't match expected output: %s",
 				i, serialized, expected)
@@ -75,6 +89,7 @@ func TestSerializeTagsReference(t *testing.T) {
 // order of maps is random we use random keys in an attempt to get 100% test
 // coverage.
 func TestSerializeTagsNetworkSort(t *testing.T) {
+	s := &statStore{sink: NewNullSink()}
 	const name = "prefix"
 
 	rand.Seed(time.Now().UnixNano())
@@ -114,7 +129,7 @@ func TestSerializeTagsNetworkSort(t *testing.T) {
 		for i := 0; i < 10; i++ {
 			tags := makeTags(i)
 			expected := serializeTagsReference(name, tags)
-			serialized := serializeTags(name, tags)
+			serialized := s.serializeTags(name, tags)
 			if serialized != expected {
 				t.Errorf("%d Serialized output (%s) didn't match expected output: %s",
 					i, serialized, expected)
@@ -124,10 +139,11 @@ func TestSerializeTagsNetworkSort(t *testing.T) {
 }
 
 func TestSerializeWithPerInstanceFlag(t *testing.T) {
+	s := &statStore{sink: NewNullSink()}
 	const name = "prefix"
 	const expected = name + ".___f=i.__foo=bar"
 	tags := map[string]string{"foo": "bar", "_f": "i"}
-	serialized := serializeTags(name, tags)
+	serialized := s.serializeTags(name, tags)
 	if serialized != expected {
 		t.Errorf("Serialized output (%s) didn't match expected output: %s",
 			serialized, expected)
@@ -135,10 +151,11 @@ func TestSerializeWithPerInstanceFlag(t *testing.T) {
 }
 
 func TestSerializeIllegalTags(t *testing.T) {
+	s := &statStore{sink: NewNullSink()}
 	const name = "prefix"
 	const expected = name + ".__foo=b_a_r.__q=p"
 	tags := map[string]string{"foo": "b|a:r", "q": "p"}
-	serialized := serializeTags(name, tags)
+	serialized := s.serializeTags(name, tags)
 	if serialized != expected {
 		t.Errorf("Serialized output (%s) didn't match expected output: %s",
 			serialized, expected)
@@ -146,10 +163,11 @@ func TestSerializeIllegalTags(t *testing.T) {
 }
 
 func TestSerializeTagValuePeriod(t *testing.T) {
+	s := &statStore{sink: NewNullSink()}
 	const name = "prefix"
 	const expected = name + ".__foo=blah_blah.__q=p"
 	tags := map[string]string{"foo": "blah.blah", "q": "p"}
-	serialized := serializeTags(name, tags)
+	serialized := s.serializeTags(name, tags)
 	if serialized != expected {
 		t.Errorf("Serialized output (%s) didn't match expected output: %s",
 			serialized, expected)
@@ -157,10 +175,11 @@ func TestSerializeTagValuePeriod(t *testing.T) {
 }
 
 func TestSerializeTagDiscardEmptyTagKeyValue(t *testing.T) {
+	s := &statStore{sink: NewNullSink()}
 	const name = "prefix"
 	const expected = name + ".__key1=value1.__key3=value3"
 	tags := map[string]string{"key1": "value1", "key2": "", "key3": "value3", "": "value4"}
-	serialized := serializeTags(name, tags)
+	serialized := s.serializeTags(name, tags)
 	if serialized != expected {
 		t.Errorf("Serialized output (%s) didn't match expected output: %s",
 			serialized, expected)
@@ -312,6 +331,7 @@ func TestMergeTagSets(t *testing.T) {
 }
 
 func benchmarkSerializeTags(b *testing.B, n int) {
+	s := &statStore{sink: NewNullSink()}
 	const name = "prefix"
 	tags := make(map[string]string, n)
 	for i := 0; i < n; i++ {
@@ -321,7 +341,7 @@ func benchmarkSerializeTags(b *testing.B, n int) {
 	}
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		serializeTags(name, tags)
+		s.serializeTags(name, tags)
 	}
 }
 
@@ -334,6 +354,7 @@ func BenchmarkSerializeTags(b *testing.B) {
 }
 
 func benchmarkSerializeTagSet(b *testing.B, n int) {
+	s := &statStore{sink: NewNullSink()}
 	const name = "prefix"
 	tags := make(tagSet, 0, n)
 	for i := 0; i < n; i++ {
@@ -347,7 +368,7 @@ func benchmarkSerializeTagSet(b *testing.B, n int) {
 	tags.Sort()
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		serializeTagSet(name, tags)
+		s.serializeTagSet(name, tags)
 	}
 }
 

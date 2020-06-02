@@ -183,11 +183,17 @@ func mergeTagSets(s1, s2, scratch tagSet) tagSet {
 	return a[:k]
 }
 
-func serializeTagSet(name string, set tagSet) string {
+func (s *statStore) serializeTagSet(name string, set tagSet) string {
 	// NB: the tagSet must be sorted and have clean values
 
-	const prefix = ".__"
-	const sep = "="
+	prefix := ".__"
+	sep := "="
+	if s.tagPrefix != "" {
+		prefix = s.tagPrefix
+	}
+	if s.tagSeparator != "" {
+		sep = s.tagSeparator
+	}
 
 	if len(set) == 0 {
 		return name
@@ -210,9 +216,15 @@ func serializeTagSet(name string, set tagSet) string {
 	return *(*string)(unsafe.Pointer(&b))
 }
 
-func serializeTags(name string, tags map[string]string) string {
-	const prefix = ".__"
-	const sep = "="
+func (s *statStore) serializeTags(name string, tags map[string]string) string {
+	prefix := ".__"
+	sep := "="
+	if s.tagPrefix != "" {
+		prefix = s.tagPrefix
+	}
+	if s.tagSeparator != "" {
+		sep = s.tagSeparator
+	}
 
 	// discard pairs where the tag or value is an empty string
 	for k, v := range tags {

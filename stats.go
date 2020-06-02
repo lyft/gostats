@@ -195,7 +195,10 @@ func NewDefaultStore() Store {
 		}
 		go newStore.Start(time.NewTicker(10 * time.Second))
 	} else {
-		newStore = NewStore(NewTCPStatsdSink(), false)
+		newStore = &statStore{
+			sink:         NewTCPStatsdSink(),
+			tagPrefix:    settings.StatsdTagPrefix,
+			tagSeparator: settings.StatsdTagSeparator}
 		go newStore.Start(time.NewTicker(time.Duration(settings.FlushIntervalS) * time.Second))
 	}
 	return newStore
@@ -305,6 +308,9 @@ type statStore struct {
 	statGenerators []StatGenerator
 
 	sink Sink
+
+	tagPrefix    string
+	tagSeparator string
 }
 
 func (s *statStore) Flush() {
@@ -377,11 +383,11 @@ func (s *statStore) NewCounter(name string) Counter {
 }
 
 func (s *statStore) NewCounterWithTags(name string, tags map[string]string) Counter {
-	return s.newCounter(serializeTags(name, tags))
+	return s.newCounter(s.serializeTags(name, tags))
 }
 
 func (s *statStore) newCounterWithTagSet(name string, tags tagSet) Counter {
-	return s.newCounter(serializeTagSet(name, tags))
+	return s.newCounter(s.serializeTagSet(name, tags))
 }
 
 var emptyPerInstanceTags = map[string]string{"_f": "i"}
@@ -427,11 +433,11 @@ func (s *statStore) NewGauge(name string) Gauge {
 }
 
 func (s *statStore) NewGaugeWithTags(name string, tags map[string]string) Gauge {
-	return s.newGauge(serializeTags(name, tags))
+	return s.newGauge(s.serializeTags(name, tags))
 }
 
 func (s *statStore) newGaugeWithTagSet(name string, tags tagSet) Gauge {
-	return s.newGauge(serializeTagSet(name, tags))
+	return s.newGauge(s.serializeTagSet(name, tags))
 }
 
 func (s *statStore) NewPerInstanceGauge(name string, tags map[string]string) Gauge {
@@ -462,11 +468,11 @@ func (s *statStore) NewTimer(name string) Timer {
 }
 
 func (s *statStore) NewTimerWithTags(name string, tags map[string]string) Timer {
-	return s.newTimer(serializeTags(name, tags))
+	return s.newTimer(s.serializeTags(name, tags))
 }
 
 func (s *statStore) newTimerWithTagSet(name string, tags tagSet) Timer {
-	return s.newTimer(serializeTagSet(name, tags))
+	return s.newTimer(s.serializeTagSet(name, tags))
 }
 
 func (s *statStore) NewPerInstanceTimer(name string, tags map[string]string) Timer {

@@ -32,6 +32,10 @@ type Settings struct {
 	StatsdProtocol string `envconfig:"STATSD_PROTOCOL" default:"tcp"`
 	// Port where statsd is listening at.
 	StatsdPort int `envconfig:"STATSD_PORT" default:"8125"`
+	// Prefix for tags.
+	StatsdTagPrefix string `envconfig:"STATSD_TAG_PREFIX" default:""`
+	// Separator for tag keys and values.
+	StatsdTagSeparator string `envconfig:"STATSD_TAG_SEPARATOR" default:""`
 	// Flushing interval.
 	FlushIntervalS int `envconfig:"GOSTATS_FLUSH_INTERVAL_SECONDS" default:"5"`
 	// Disable the LoggingSink when USE_STATSD is false and use the NullSink instead.
