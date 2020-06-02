@@ -1,18 +1,6 @@
 # Go source files
 SRCS := $(shell find . -type d -name 'vendor' -prune -o -name '*.go' -print)
 
-.PHONY: install
-install: glide #download dependencies (including test deps) for the package
-	glide install
-
-.PHONY: update
-update: glide #updates dependencies used by the package and installs them
-	glide update
-
-.PHONY: glide
-glide: # ensure the glide package tool is installed
-	which glide || go get github.com/Masterminds/glide
-
 .PHONY: lint
 lint: #lints the package for common code smells
 	@for file in $(SRCS); do \
@@ -21,9 +9,8 @@ lint: #lints the package for common code smells
 			exit 1; \
 		fi; \
 	done
-	which golint || go get -u golang.org/x/lint/golint
 	which shadow || go get golang.org/x/tools/go/analysis/passes/shadow/cmd/shadow
-	golint -set_exit_status $(shell go list ./...)
+	go run golang.org/x/lint/golint -set_exit_status $(shell go list ./...)
 	go vet -all ./...
 	go vet -vettool=$(which shadow) ./...
 
