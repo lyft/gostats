@@ -3,44 +3,156 @@ package mock
 import (
 	"fmt"
 	"math"
+	"reflect"
 	"runtime"
 	"sync"
 	"sync/atomic"
 	"testing"
 )
 
+type ErrorTest struct {
+	testing.TB
+	errMsg string
+}
+
+func NewErrorTest(t testing.TB) *ErrorTest {
+	return &ErrorTest{TB: t}
+}
+
+func (t *ErrorTest) Error(args ...interface{}) {
+	t.errMsg = fmt.Sprint(args...)
+}
+
+func (t *ErrorTest) Errorf(format string, args ...interface{}) {
+	t.errMsg = fmt.Sprintf(format, args...)
+}
+
+func (t *ErrorTest) AssertErrorMsg(format string, args ...interface{}) {
+	exp := fmt.Sprintf(format, args...)
+	if t.errMsg != exp {
+		t.TB.Errorf("Expected error message: `%s` got: `%s`", exp, t.errMsg)
+	}
+}
+
+func AssertErrorMsg(t testing.TB, fn func(t testing.TB), format string, args ...interface{}) {
+	t.Helper()
+	x := NewErrorTest(t)
+	fn(x)
+	x.AssertErrorMsg(format, args...)
+}
+
+func (t *ErrorTest) Reset() testing.TB {
+	t.errMsg = ""
+	return t
+}
+
 func TestSink(t *testing.T) {
 	testCounter := func(t *testing.T, exp uint64, sink *Sink) {
 		t.Helper()
 		const name = "test-counter"
 		sink.FlushCounter(name, exp)
-		sink.AssertCounterEquals(t, name, exp)
 		sink.AssertCounterExists(t, name)
+		sink.AssertCounterEquals(t, name, exp)
 		sink.AssertCounterCallCount(t, name, 1)
 		if n := sink.Counter(name); n != exp {
 			t.Errorf("Counter(): want: %d got: %d", exp, n)
 		}
+
+		const missing = name + "-MISSING"
+		sink.AssertCounterNotExists(t, missing)
+
+		fns := []func(t testing.TB){
+			func(t testing.TB) { sink.AssertCounterExists(t, missing) },
+			func(t testing.TB) { sink.AssertCounterEquals(t, missing, 9999) },
+			func(t testing.TB) { sink.AssertCounterCallCount(t, missing, 9999) },
+		}
+		for _, fn := range fns {
+			AssertErrorMsg(t, fn, "gostats/mock: Counter (%q): not found", missing)
+		}
+
+		AssertErrorMsg(t, func(t testing.TB) {
+			sink.AssertCounterEquals(t, name, 9999)
+		}, "gostats/mock: Counter (%q): Expected: %d Got: %d", name, 9999, exp)
+
+		AssertErrorMsg(t, func(t testing.TB) {
+			sink.AssertCounterCallCount(t, name, 9999)
+		}, "gostats/mock: Counter (%q) Call Count: Expected: %d Got: %d", name, 9999, 1)
+
+		AssertErrorMsg(t, func(t testing.TB) {
+			sink.AssertCounterNotExists(t, name)
+		}, "gostats/mock: Counter (%q): expected Counter to not exist", name)
 	}
+
 	testGauge := func(t *testing.T, exp uint64, sink *Sink) {
 		const name = "test-gauge"
 		sink.FlushGauge(name, exp)
-		sink.AssertGaugeEquals(t, name, exp)
 		sink.AssertGaugeExists(t, name)
+		sink.AssertGaugeEquals(t, name, exp)
 		sink.AssertGaugeCallCount(t, name, 1)
 		if n := sink.Gauge(name); n != exp {
 			t.Errorf("Gauge(): want: %d got: %d", exp, n)
 		}
+
+		const missing = name + "-MISSING"
+		sink.AssertGaugeNotExists(t, missing)
+
+		fns := []func(t testing.TB){
+			func(t testing.TB) { sink.AssertGaugeExists(t, missing) },
+			func(t testing.TB) { sink.AssertGaugeEquals(t, missing, 9999) },
+			func(t testing.TB) { sink.AssertGaugeCallCount(t, missing, 9999) },
+		}
+		for _, fn := range fns {
+			AssertErrorMsg(t, fn, "gostats/mock: Gauge (%q): not found", missing)
+		}
+
+		AssertErrorMsg(t, func(t testing.TB) {
+			sink.AssertGaugeEquals(t, name, 9999)
+		}, "gostats/mock: Gauge (%q): Expected: %d Got: %d", name, 9999, exp)
+
+		AssertErrorMsg(t, func(t testing.TB) {
+			sink.AssertGaugeCallCount(t, name, 9999)
+		}, "gostats/mock: Gauge (%q) Call Count: Expected: %d Got: %d", name, 9999, 1)
+
+		AssertErrorMsg(t, func(t testing.TB) {
+			sink.AssertGaugeNotExists(t, name)
+		}, "gostats/mock: Gauge (%q): expected Gauge to not exist", name)
 	}
+
 	testTimer := func(t *testing.T, exp float64, sink *Sink) {
 		const name = "test-timer"
 		sink.FlushTimer(name, exp)
-		sink.AssertTimerEquals(t, name, exp)
 		sink.AssertTimerExists(t, name)
+		sink.AssertTimerEquals(t, name, exp)
 		sink.AssertTimerCallCount(t, name, 1)
 		if n := sink.Timer(name); n != exp {
 			t.Errorf("Timer(): want: %f got: %f", exp, n)
 		}
+
+		const missing = name + "-MISSING"
+		sink.AssertTimerNotExists(t, missing)
+
+		fns := []func(t testing.TB){
+			func(t testing.TB) { sink.AssertTimerExists(t, missing) },
+			func(t testing.TB) { sink.AssertTimerEquals(t, missing, 9999) },
+			func(t testing.TB) { sink.AssertTimerCallCount(t, missing, 9999) },
+		}
+		for _, fn := range fns {
+			AssertErrorMsg(t, fn, "gostats/mock: Timer (%q): not found", missing)
+		}
+
+		AssertErrorMsg(t, func(t testing.TB) {
+			sink.AssertTimerEquals(t, name, 9999)
+		}, "gostats/mock: Timer (%q): Expected: %f Got: %f", name, 9999.0, exp)
+
+		AssertErrorMsg(t, func(t testing.TB) {
+			sink.AssertTimerCallCount(t, name, 9999)
+		}, "gostats/mock: Timer (%q) Call Count: Expected: %d Got: %d", name, 9999, 1)
+
+		AssertErrorMsg(t, func(t testing.TB) {
+			sink.AssertTimerNotExists(t, name)
+		}, "gostats/mock: Timer (%q): expected Timer to not exist", name)
 	}
+
 	// test 0..1 - we want to make sure that 0 still registers a stat
 	for i := 0; i < 2; i++ {
 		t.Run("Counter", func(t *testing.T) {
@@ -57,6 +169,48 @@ func TestSink(t *testing.T) {
 		testCounter(t, 1, sink)
 		testGauge(t, 1, sink)
 		testTimer(t, 1, sink)
+	}
+}
+
+func TestSinkMap_Values(t *testing.T) {
+	expCounters := make(map[string]uint64)
+	expGauges := make(map[string]uint64)
+	expTimers := make(map[string]float64)
+
+	sink := NewSink()
+	for i := 0; i < 2; i++ {
+		expCounters[fmt.Sprintf("counter-%d", i)] = uint64(i)
+		expGauges[fmt.Sprintf("gauge-%d", i)] = uint64(i)
+		expTimers[fmt.Sprintf("timer-%d", i)] = float64(i)
+
+		sink.FlushCounter(fmt.Sprintf("counter-%d", i), uint64(i))
+		sink.FlushGauge(fmt.Sprintf("gauge-%d", i), uint64(i))
+		sink.FlushTimer(fmt.Sprintf("timer-%d", i), float64(i))
+	}
+	counters := sink.Counters()
+	if !reflect.DeepEqual(expCounters, counters) {
+		t.Errorf("Counters: want: %#v got: %#v", expCounters, counters)
+	}
+
+	gauges := sink.Gauges()
+	if !reflect.DeepEqual(expGauges, gauges) {
+		t.Errorf("Gauges: want: %#v got: %#v", expGauges, gauges)
+	}
+
+	timers := sink.Timers()
+	if !reflect.DeepEqual(expTimers, timers) {
+		t.Errorf("Timers: want: %#v got: %#v", expTimers, timers)
+	}
+
+	sink.Reset()
+	if n := len(sink.Counters()); n != 0 {
+		t.Errorf("Failed to reset Counters got: %d", n)
+	}
+	if n := len(sink.Gauges()); n != 0 {
+		t.Errorf("Failed to reset Gauges got: %d", n)
+	}
+	if n := len(sink.Timers()); n != 0 {
+		t.Errorf("Failed to reset Timers got: %d", n)
 	}
 }
 

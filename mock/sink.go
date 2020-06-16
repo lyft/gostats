@@ -132,6 +132,40 @@ func (s *Sink) LoadTimer(name string) (float64, bool) {
 	return 0, false
 }
 
+// Counters returns all the counters currently stored by the sink.
+func (s *Sink) Counters() map[string]uint64 {
+	m := make(map[string]uint64)
+	s.counters().Range(func(k, v interface{}) bool {
+		p := v.(*entry)
+		m[k.(string)] = atomic.LoadUint64(&p.val)
+		return true
+	})
+	return m
+}
+
+// Gauges returns all the gauges currently stored by the sink.
+func (s *Sink) Gauges() map[string]uint64 {
+	m := make(map[string]uint64)
+	s.gauges().Range(func(k, v interface{}) bool {
+		p := v.(*entry)
+		m[k.(string)] = atomic.LoadUint64(&p.val)
+		return true
+	})
+	return m
+}
+
+// Timers returns all the timers currently stored by the sink.
+func (s *Sink) Timers() map[string]float64 {
+	m := make(map[string]float64)
+	s.timers().Range(func(k, v interface{}) bool {
+		p := v.(*entry)
+		bits := atomic.LoadUint64(&p.val)
+		m[k.(string)] = math.Float64frombits(bits)
+		return true
+	})
+	return m
+}
+
 // short-hand methods
 
 // Counter is shorthand for LoadCounter, zero is returned if the stat is not found.
@@ -226,7 +260,7 @@ func (s *Sink) AssertTimerEquals(tb testing.TB, name string, exp float64) {
 func (s *Sink) AssertCounterExists(tb testing.TB, name string) {
 	tb.Helper()
 	if _, ok := s.LoadCounter(name); !ok {
-		tb.Errorf("gostats/mock: Counter (%q): should exist", name)
+		tb.Errorf("gostats/mock: Counter (%q): not found", name)
 	}
 }
 
@@ -234,7 +268,7 @@ func (s *Sink) AssertCounterExists(tb testing.TB, name string) {
 func (s *Sink) AssertGaugeExists(tb testing.TB, name string) {
 	tb.Helper()
 	if _, ok := s.LoadGauge(name); !ok {
-		tb.Errorf("gostats/mock: Gauge (%q): should exist", name)
+		tb.Errorf("gostats/mock: Gauge (%q): not found", name)
 	}
 }
 
@@ -242,7 +276,7 @@ func (s *Sink) AssertGaugeExists(tb testing.TB, name string) {
 func (s *Sink) AssertTimerExists(tb testing.TB, name string) {
 	tb.Helper()
 	if _, ok := s.LoadTimer(name); !ok {
-		tb.Errorf("gostats/mock: Timer (%q): should exist", name)
+		tb.Errorf("gostats/mock: Timer (%q): not found", name)
 	}
 }
 
