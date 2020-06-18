@@ -1,7 +1,7 @@
 package mock_test
 
 import (
-	"github.com/lyft/gostats"
+	stats "github.com/lyft/gostats"
 	"github.com/lyft/gostats/mock"
 )
 
