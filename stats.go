@@ -490,7 +490,7 @@ type subScope struct {
 func newSubScope(registry *statStore, name string, tags map[string]string) *subScope {
 	a := make(tagSet, 0, len(tags))
 	for k, v := range tags {
-		if k != "" && v != "" {
+		if k != "" && v != "" && isAscii(k) {
 			a = append(a, tagPair{key: k, value: replaceChars(v)})
 		}
 	}
@@ -567,7 +567,7 @@ func (s *subScope) mergeOneTag(tags map[string]string) tagSet {
 		p = tagPair{key: k, value: replaceChars(v)}
 		break
 	}
-	if p.key == "" || p.value == "" {
+	if p.key == "" || p.value == "" || !isAscii(p.key) {
 		return s.tags
 	}
 	a := make(tagSet, len(s.tags), len(s.tags)+1)
@@ -591,7 +591,7 @@ func (s *subScope) mergeTags(tags map[string]string) tagSet {
 		a := scratch[len(s.tags):]
 		i := 0
 		for k, v := range tags {
-			if k != "" && v != "" {
+			if k != "" && v != "" && isAscii(k) {
 				a[i] = tagPair{key: k, value: replaceChars(v)}
 				i++
 			}

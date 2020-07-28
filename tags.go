@@ -210,13 +210,22 @@ func serializeTagSet(name string, set tagSet) string {
 	return *(*string)(unsafe.Pointer(&b))
 }
 
+func isAscii(s string) bool {
+	for i := 0; i < len(s); i++ {
+		if s[i] >= 0x80 {
+			return false
+		}
+	}
+	return true
+}
+
 func serializeTags(name string, tags map[string]string) string {
 	const prefix = ".__"
 	const sep = "="
 
 	// discard pairs where the tag or value is an empty string
 	for k, v := range tags {
-		if k == "" || v == "" {
+		if k == "" || !isAscii(k) || v == "" {
 			delete(tags, k)
 		}
 	}
