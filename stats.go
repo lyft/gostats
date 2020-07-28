@@ -386,29 +386,32 @@ func (s *statStore) newCounterWithTagSet(name string, tags tagSet) Counter {
 
 var emptyPerInstanceTags = map[string]string{"_f": "i"}
 
+// convertTagsToPerInstanceTagSet converts a tag map that is missing the
+// per-instance key "_f" to a tagSet that has the per-instance key.
+//
+// Previously, we modified the map, but that is no longer allowed and creating
+// a new tagSet is faster and more memory efficient than creating a duplicate
+// map.
+func convertTagsToPerInstanceTagSet(tags map[string]string) tagSet {
+	set := make(tagSet, 1, len(tags)+1)
+	set[0] = tagPair{key: "_f", value: "i"}
+	for k, v := range tags {
+		if k != "" && v != "" {
+			set = append(set, tagPair{key: k, value: replaceChars(v)})
+		}
+	}
+	set.Sort()
+	return set
+}
+
 func (s *statStore) NewPerInstanceCounter(name string, tags map[string]string) Counter {
 	if len(tags) == 0 {
 		return s.NewCounterWithTags(name, emptyPerInstanceTags)
 	}
-
-	if _, found := tags["_f"]; !found {
-		tags["_f"] = "i"
+	if _, found := tags["_f"]; found {
+		return s.NewCounterWithTags(name, tags)
 	}
-
-	return s.NewCounterWithTags(name, tags)
-}
-
-type statCache struct {
-	cache sync.Map
-	new   func() interface{}
-}
-
-func (s *statCache) LoadOrCreate(key string) interface{} {
-	if v, ok := s.cache.Load(key); ok {
-		return v
-	}
-	v, _ := s.cache.LoadOrStore(key, s.new())
-	return v
+	return s.newCounterWithTagSet(name, convertTagsToPerInstanceTagSet(tags))
 }
 
 func (s *statStore) newGauge(serializedName string) *gauge {
@@ -438,12 +441,10 @@ func (s *statStore) NewPerInstanceGauge(name string, tags map[string]string) Gau
 	if len(tags) == 0 {
 		return s.NewGaugeWithTags(name, emptyPerInstanceTags)
 	}
-
-	if _, found := tags["_f"]; !found {
-		tags["_f"] = "i"
+	if _, found := tags["_f"]; found {
+		return s.NewGaugeWithTags(name, tags)
 	}
-
-	return s.NewGaugeWithTags(name, tags)
+	return s.newGaugeWithTagSet(name, convertTagsToPerInstanceTagSet(tags))
 }
 
 func (s *statStore) newTimer(serializedName string) *timer {
@@ -473,12 +474,10 @@ func (s *statStore) NewPerInstanceTimer(name string, tags map[string]string) Tim
 	if len(tags) == 0 {
 		return s.NewTimerWithTags(name, emptyPerInstanceTags)
 	}
-
-	if _, found := tags["_f"]; !found {
-		tags["_f"] = "i"
+	if _, found := tags["_f"]; found {
+		return s.NewTimerWithTags(name, tags)
 	}
-
-	return s.NewTimerWithTags(name, tags)
+	return s.newTimerWithTagSet(name, convertTagsToPerInstanceTagSet(tags))
 }
 
 type subScope struct {
