@@ -1,0 +1,37 @@
+#!/usr/bin/env bash
+
+# vet runs go vet with additional analysis passes
+
+set -euo pipefail
+
+vettools=(
+    'nilness'
+    'stringintconv'
+    'unmarshal'
+    'shadow'
+    'lostcancel'
+    'findcall'
+    'ifaceassert'
+)
+
+# Install tools
+export GO111MODULE=on
+go install golang.org/x/tools/...
+
+EXIT_CODE=0
+
+# Run go vet
+if ! go vet github.com/lyft/gostats/...; then
+    EXIT_CODE=1
+fi
+
+# Run additional analysis tools
+for tool in "${vettools[@]}"; do
+    if ! go vet -vettool="$(type -p "${tool}")" github.com/lyft/gostats/...; then
+        EXIT_CODE=1
+    fi
+done
+
+exit $EXIT_CODE
+
+# vim: filetype=sh

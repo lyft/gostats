@@ -5,19 +5,17 @@ SRCS := $(shell find . -type d -name 'vendor' -prune -o -name '*.go' -print)
 install:
 	go mod download
 
-.PHONY: lint
-lint: #lints the package for common code smells
-	@for file in $(SRCS); do \
-		gofmt -d -s $${file}; \
-		if [ -n "$$(gofmt -d -s $${file})" ]; then \
-			exit 1; \
-		fi; \
-	done
-	which golint || go get -u golang.org/x/lint/golint
-	which shadow || go get golang.org/x/tools/go/analysis/passes/shadow/cmd/shadow
+.PHONY: golint
+golint:
+	scripts/lint
 	golint -set_exit_status $(shell go list ./...)
-	go vet -all ./...
-	go vet -vettool=$(which shadow) ./...
+
+.PHONY: govet
+govet:
+	scripts/vet
+
+.PHONY: lint
+lint: golint govet
 
 .PHONY: test
 test: # runs all tests against the package with race detection and coverage percentage

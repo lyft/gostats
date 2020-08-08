@@ -1,0 +1,40 @@
+#!/usr/bin/env bash
+
+# runs gofmt and goimports
+
+set -euo pipefail
+
+FMT_CMD=\gofmt
+FMT_FLAGS=(-s -l)
+IMPORTS_CMD=\goimports
+IMPORTS_FLAGS=(-l -local github.com/lyft/gostats)
+
+PROJECT_DIR="$(go list -f '{{.Dir}}' github.com/lyft/gostats)"
+FIND_ARGS=(
+    "${PROJECT_DIR}"
+    -type d \( -name vendor -o -name .git \) -prune -o
+    -type f -name '*.go' -print0
+)
+
+EXIT_CODE=0
+
+FMT_CHANGES="$(\find "${FIND_ARGS[@]}" | \xargs -0 ${FMT_CMD} "${FMT_FLAGS[@]}")"
+if [[ -n "$FMT_CHANGES" ]]; then
+    echo "ERROR: the folliwing files would be changed by \`${FMT_CMD} ${FMT_FLAGS[*]}\`:"
+    echo "$FMT_CHANGES"
+    EXIT_CODE=1
+fi
+
+IMPORTS_CHANGES="$(\find "${FIND_ARGS[@]}" | \xargs -0 ${IMPORTS_CMD} "${IMPORTS_FLAGS[@]}")"
+if [[ -n "$IMPORTS_CHANGES" ]]; then
+    if (( EXIT_CODE = 1 )); then
+        echo ""
+    fi
+    echo "ERROR: the folliwing files would be changed by \`${IMPORTS_CMD} ${IMPORTS_FLAGS[*]}\`:"
+    echo "$IMPORTS_CHANGES"
+    EXIT_CODE=1
+fi
+
+exit $EXIT_CODE
+
+# vim: filetype=sh
