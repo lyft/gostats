@@ -5,27 +5,27 @@ import (
 	"unsafe"
 )
 
-type tagPair struct {
+type Tag struct {
 	key   string
 	value string
 }
 
-type tagSet []tagPair
+type TagSet []Tag
 
-func (t tagSet) Len() int           { return len(t) }
-func (t tagSet) Swap(i, j int)      { t[i], t[j] = t[j], t[i] }
-func (t tagSet) Less(i, j int) bool { return t[i].key < t[j].key }
+func (t TagSet) Len() int           { return len(t) }
+func (t TagSet) Swap(i, j int)      { t[i], t[j] = t[j], t[i] }
+func (t TagSet) Less(i, j int) bool { return t[i].key < t[j].key }
 
 // cas performs a compare and swap and is inlined into Sort()
 // check with: `go build -gcflags='-m'`.
-func (t tagSet) cas(i, j int) {
+func (t TagSet) cas(i, j int) {
 	if t[i].key > t[j].key {
 		t.Swap(i, j)
 	}
 }
 
 // Sort sorts the tagSet in place and is optimized for small (N <= 8) tagSets.
-func (t tagSet) Sort() {
+func (t TagSet) Sort() {
 	// network sort generated with: https://pages.ripco.net/~jgamble/nw.html
 	// using "best": https://metacpan.org/pod/Algorithm::Networksort::Best
 	//
@@ -114,7 +114,7 @@ func (t tagSet) Sort() {
 }
 
 // Search is the same as sort.Search() but is optimized for our use case.
-func (t tagSet) Search(key string) int {
+func (t TagSet) Search(key string) int {
 	i, j := 0, len(t)
 	for i < j {
 		h := (i + j) / 2
@@ -128,7 +128,7 @@ func (t tagSet) Search(key string) int {
 }
 
 // Contains returns if the tagSet contains key.
-func (t tagSet) Contains(key string) bool {
+func (t TagSet) Contains(key string) bool {
 	if len(t) == 0 {
 		return false
 	}
@@ -138,7 +138,7 @@ func (t tagSet) Contains(key string) bool {
 
 // Inserts tagPair p into tagSet, if a tagPair with the same key exists it is
 // replaced.
-func (t tagSet) Insert(p tagPair) tagSet {
+func (t TagSet) Insert(p Tag) TagSet {
 	i := t.Search(p.key)
 	if i < len(t) && t[i].key == p.key {
 		t[i].value = p.value
@@ -149,16 +149,110 @@ func (t tagSet) Insert(p tagPair) tagSet {
 		return append(t, p)
 	}
 	// insert p
-	t = append(t, tagPair{})
+	t = append(t, Tag{})
 	copy(t[i+1:], t[i:])
 	t[i] = p
 	return t
 }
 
+// mergeOneTag is an optimized for inserting 1 tag and will panic otherwise.
+func mergeOneTag(set TagSet, tags map[string]string) TagSet {
+	if len(tags) != 1 {
+		panic("invalid usage")
+	}
+	var p Tag
+	for k, v := range tags {
+		p = Tag{key: k, value: replaceChars(v)}
+		break
+	}
+	if p.key == "" || p.value == "" {
+		return set
+	}
+	a := make(TagSet, len(set), len(set)+1)
+	copy(a, set)
+	return a.Insert(p)
+}
+
+// mergeTags returns a tagSet that is the union of subScope's tags and the
+// provided tags map. If any keys overlap the values from the provided map
+// are used.
+func mergeTags(set TagSet, tags map[string]string) TagSet {
+	switch len(tags) {
+	case 0:
+		return set
+	case 1:
+		// optimize for the common case of there only being one tag
+		return mergeOneTag(set, tags)
+	default:
+		// write tags to the end of the scratch slice
+		scratch := make(TagSet, len(set)+len(tags))
+		a := scratch[len(set):]
+		i := 0
+		for k, v := range tags {
+			if k != "" && v != "" {
+				a[i] = Tag{key: k, value: replaceChars(v)}
+				i++
+			}
+		}
+		a = a[:i]
+		a.Sort()
+
+		if len(set) == 0 {
+			return a
+		}
+		return mergeTagSets(set, a, scratch)
+	}
+}
+
+// mergePerInstanceTags returns a tagSet that is the union of subScope's
+// tags and the provided tags map with. If any keys overlap the values from
+// the provided map are used.
+//
+// The returned tagSet will have a per-instance key ("_f") and if neither the
+// subScope or tags have this key it's value will be the default per-instance
+// value ("i").
+//
+// The method does not optimize for the case where there is only one tag
+// because it is used less frequently.
+func mergePerInstanceTags(set TagSet, tags map[string]string) TagSet {
+	if len(tags) == 0 {
+		if set.Contains("_f") {
+			return set
+		}
+		// create copy with the per-instance tag
+		a := make(TagSet, len(set), len(set)+1)
+		copy(a, set)
+		return a.Insert(Tag{key: "_f", value: "i"})
+	}
+
+	// write tags to the end of scratch slice
+	scratch := make(TagSet, len(set)+len(tags)+1)
+	a := scratch[len(set):]
+	i := 0
+	for k, v := range tags {
+		if k != "" && v != "" {
+			a[i] = Tag{key: k, value: replaceChars(v)}
+			i++
+		}
+	}
+	// add the default per-instance tag if not present
+	if tags["_f"] == "" && !set.Contains("_f") {
+		a[i] = Tag{key: "_f", value: "i"}
+		i++
+	}
+	a = a[:i]
+	a.Sort()
+
+	if len(set) == 0 {
+		return a
+	}
+	return mergeTagSets(set, a, scratch)
+}
+
 // mergeTagSets merges s1 into s2 and stores the result in scratch. Both s1 and
 // s2 must be sorted and s2 can be a sub-slice of scratch if it is located at
 // the tail of the slice (this allows us to allocate only one slice).
-func mergeTagSets(s1, s2, scratch tagSet) tagSet {
+func mergeTagSets(s1, s2, scratch TagSet) TagSet {
 	a := scratch
 	i, j, k := 0, 0, 0
 	for ; i < len(s1) && j < len(s2) && k < len(a); k++ {
@@ -183,7 +277,7 @@ func mergeTagSets(s1, s2, scratch tagSet) tagSet {
 	return a[:k]
 }
 
-func serializeTagSet(name string, set tagSet) string {
+func serializeTagSet(name string, set TagSet) string {
 	// NB: the tagSet must be sorted and have clean values
 
 	const prefix = ".__"
@@ -233,13 +327,13 @@ func serializeTags(name string, tags map[string]string) string {
 		}
 		panic("unreachable")
 	case 2:
-		var t0, t1 tagPair
+		var t0, t1 Tag
 		for k, v := range tags {
 			if k == "" || v == "" {
 				continue
 			}
 			t1 = t0
-			t0 = tagPair{k, replaceChars(v)}
+			t0 = Tag{k, replaceChars(v)}
 		}
 		if t0.key > t1.key {
 			t0, t1 = t1, t0
@@ -247,14 +341,14 @@ func serializeTags(name string, tags map[string]string) string {
 		return name + prefix + t0.key + sep + t0.value +
 			prefix + t1.key + sep + t1.value
 	case 3:
-		var t0, t1, t2 tagPair
+		var t0, t1, t2 Tag
 		for k, v := range tags {
 			if k == "" || v == "" {
 				continue
 			}
 			t2 = t1
 			t1 = t0
-			t0 = tagPair{k, replaceChars(v)}
+			t0 = Tag{k, replaceChars(v)}
 		}
 		if t1.key > t2.key {
 			t1, t2 = t2, t1
@@ -269,7 +363,7 @@ func serializeTags(name string, tags map[string]string) string {
 			prefix + t1.key + sep + t1.value +
 			prefix + t2.key + sep + t2.value
 	case 4:
-		var t0, t1, t2, t3 tagPair
+		var t0, t1, t2, t3 Tag
 		for k, v := range tags {
 			if k == "" || v == "" {
 				continue
@@ -277,7 +371,7 @@ func serializeTags(name string, tags map[string]string) string {
 			t3 = t2
 			t2 = t1
 			t1 = t0
-			t0 = tagPair{k, replaceChars(v)}
+			t0 = Tag{k, replaceChars(v)}
 		}
 		if t0.key > t1.key {
 			t0, t1 = t1, t0
@@ -303,13 +397,13 @@ func serializeTags(name string, tags map[string]string) string {
 		n := (len(prefix) + len(sep)) * numValid
 		n += len(name)
 
-		pairs := make(tagSet, 0, numValid)
+		pairs := make(TagSet, 0, numValid)
 		for k, v := range tags {
 			if k == "" || v == "" {
 				continue
 			}
 			n += len(k) + len(v)
-			pairs = append(pairs, tagPair{
+			pairs = append(pairs, Tag{
 				key:   k,
 				value: replaceChars(v),
 			})
