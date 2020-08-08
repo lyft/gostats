@@ -7,8 +7,11 @@ import (
 	"encoding/base64"
 	"fmt"
 	"math/rand"
+	"reflect"
+	"runtime"
 	"sort"
 	"strconv"
+	"sync"
 	"testing"
 	"time"
 )
@@ -120,6 +123,121 @@ func TestSerializeTagsNetworkSort(t *testing.T) {
 					i, serialized, expected)
 			}
 		}
+	}
+}
+
+func TestSerializeTagsInvalidKeyValue(t *testing.T) {
+
+	// Baseline tests against a hardcoded expected value
+	t.Run("Baseline", func(t *testing.T) {
+		const expected = "name.__1=1"
+		tags := map[string]string{
+			"":              "invalid_key",
+			"invalid_value": "",
+			"1":             "1",
+		}
+		orig := make(map[string]string)
+		for k, v := range tags {
+			orig[k] = v
+		}
+
+		s := serializeTags("name", tags)
+		if s != expected {
+			t.Errorf("Serialized output (%s) didn't match expected output: %s",
+				s, expected)
+		}
+
+		if !reflect.DeepEqual(tags, orig) {
+			t.Errorf("serializeTags modified the input map: %+v want: %+v", tags, orig)
+		}
+	})
+
+	createTags := func(n int) map[string]string {
+		tags := make(map[string]string)
+		for i := 0; i < n; i++ {
+			key := fmt.Sprintf("key_%d", i)
+			val := fmt.Sprintf("val_%d", i)
+			tags[key] = val
+		}
+		return tags
+	}
+
+	test := func(t *testing.T, tags map[string]string) {
+		orig := make(map[string]string)
+		for k, v := range tags {
+			orig[k] = v
+		}
+
+		got := serializeTags("name", tags)
+		exp := serializeTagsReference("name", tags)
+		if got != exp {
+			t.Errorf("Tags (%d) got: %q want: %q", len(tags), got, exp)
+		}
+
+		if !reflect.DeepEqual(tags, orig) {
+			t.Errorf("serializeTags modified the input map: %+v want: %+v", tags, orig)
+		}
+	}
+
+	t.Run("EmptyValue", func(t *testing.T) {
+		for n := 0; n <= 10; n++ {
+			tags := createTags(n)
+			tags["invalid"] = ""
+			test(t, tags)
+		}
+	})
+
+	t.Run("EmptyKey", func(t *testing.T) {
+		for n := 0; n <= 10; n++ {
+			tags := createTags(n)
+			tags[""] = "invalid"
+			test(t, tags)
+		}
+	})
+
+	t.Run("EmptyKeyValue", func(t *testing.T) {
+		for n := 0; n <= 10; n++ {
+			tags := createTags(n)
+			tags[""] = "invalid"
+			tags["invalid"] = ""
+			test(t, tags)
+		}
+	})
+}
+
+func TestSerializeTagsInvalidKeyValue_ThreadSafe(t *testing.T) {
+	tags := map[string]string{
+		"":  "invalid_key",
+		"1": "1",
+	}
+	// Add some more keys to slow this down
+	for i := 0; i < 256; i++ {
+		v := "val_" + strconv.Itoa(i)
+		k := "key_" + v
+		tags[k] = v
+	}
+
+	// Make a copy
+	orig := make(map[string]string, len(tags))
+	for k, v := range tags {
+		orig[k] = v
+	}
+
+	start := make(chan struct{})
+	var wg sync.WaitGroup
+	for i := 0; i < runtime.NumCPU()*2; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			<-start
+			serializeTags("name", tags)
+		}()
+	}
+	close(start)
+	wg.Wait()
+
+	if !reflect.DeepEqual(tags, orig) {
+		t.Error("serializeTags modified the input map")
 	}
 }
 

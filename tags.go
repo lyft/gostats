@@ -215,23 +215,29 @@ func serializeTags(name string, tags map[string]string) string {
 	const sep = "="
 
 	// discard pairs where the tag or value is an empty string
+	numValid := len(tags)
 	for k, v := range tags {
 		if k == "" || v == "" {
-			delete(tags, k)
+			numValid--
 		}
 	}
 
-	switch len(tags) {
+	switch numValid {
 	case 0:
 		return name
 	case 1:
 		for k, v := range tags {
-			return name + prefix + k + sep + replaceChars(v)
+			if k != "" && v != "" {
+				return name + prefix + k + sep + replaceChars(v)
+			}
 		}
 		panic("unreachable")
 	case 2:
 		var t0, t1 tagPair
 		for k, v := range tags {
+			if k == "" || v == "" {
+				continue
+			}
 			t1 = t0
 			t0 = tagPair{k, replaceChars(v)}
 		}
@@ -243,6 +249,9 @@ func serializeTags(name string, tags map[string]string) string {
 	case 3:
 		var t0, t1, t2 tagPair
 		for k, v := range tags {
+			if k == "" || v == "" {
+				continue
+			}
 			t2 = t1
 			t1 = t0
 			t0 = tagPair{k, replaceChars(v)}
@@ -262,6 +271,9 @@ func serializeTags(name string, tags map[string]string) string {
 	case 4:
 		var t0, t1, t2, t3 tagPair
 		for k, v := range tags {
+			if k == "" || v == "" {
+				continue
+			}
 			t3 = t2
 			t2 = t1
 			t1 = t0
@@ -288,11 +300,14 @@ func serializeTags(name string, tags map[string]string) string {
 			prefix + t3.key + sep + t3.value
 	default:
 		// n stores the length of the serialized name + tags
-		n := (len(prefix) + len(sep)) * len(tags)
+		n := (len(prefix) + len(sep)) * numValid
 		n += len(name)
 
-		pairs := make(tagSet, 0, len(tags))
+		pairs := make(tagSet, 0, numValid)
 		for k, v := range tags {
+			if k == "" || v == "" {
+				continue
+			}
 			n += len(k) + len(v)
 			pairs = append(pairs, tagPair{
 				key:   k,
