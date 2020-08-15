@@ -377,32 +377,14 @@ func (s *statStore) NewCounter(name string) Counter {
 }
 
 func (s *statStore) NewCounterWithTags(name string, tags map[string]string) Counter {
-	return s.newCounter(serializeTags(name, tags))
+	return s.newCounter(SerializeTags(name, tags))
 }
 
 func (s *statStore) newCounterWithTagSet(name string, tags TagSet) Counter {
-	return s.newCounter(serializeTagSet(name, tags))
+	return s.newCounter(tags.Serialize(name))
 }
 
 var emptyPerInstanceTags = map[string]string{"_f": "i"}
-
-// convertTagsToPerInstanceTagSet converts a tag map that is missing the
-// per-instance key "_f" to a tagSet that has the per-instance key.
-//
-// Previously, we modified the map, but that is no longer allowed and creating
-// a new tagSet is faster and more memory efficient than creating a duplicate
-// map.
-func convertTagsToPerInstanceTagSet(tags map[string]string) TagSet {
-	set := make(TagSet, 1, len(tags)+1)
-	set[0] = Tag{key: "_f", value: "i"}
-	for k, v := range tags {
-		if k != "" && v != "" {
-			set = append(set, Tag{key: k, value: replaceChars(v)})
-		}
-	}
-	set.Sort()
-	return set
-}
 
 func (s *statStore) NewPerInstanceCounter(name string, tags map[string]string) Counter {
 	if len(tags) == 0 {
@@ -411,7 +393,7 @@ func (s *statStore) NewPerInstanceCounter(name string, tags map[string]string) C
 	if _, found := tags["_f"]; found {
 		return s.NewCounterWithTags(name, tags)
 	}
-	return s.newCounterWithTagSet(name, convertTagsToPerInstanceTagSet(tags))
+	return s.newCounterWithTagSet(name, TagSet(nil).MergePerInstanceTags(tags))
 }
 
 func (s *statStore) newGauge(serializedName string) *gauge {
@@ -430,11 +412,11 @@ func (s *statStore) NewGauge(name string) Gauge {
 }
 
 func (s *statStore) NewGaugeWithTags(name string, tags map[string]string) Gauge {
-	return s.newGauge(serializeTags(name, tags))
+	return s.newGauge(SerializeTags(name, tags))
 }
 
 func (s *statStore) newGaugeWithTagSet(name string, tags TagSet) Gauge {
-	return s.newGauge(serializeTagSet(name, tags))
+	return s.newGauge(tags.Serialize(name))
 }
 
 func (s *statStore) NewPerInstanceGauge(name string, tags map[string]string) Gauge {
@@ -444,7 +426,7 @@ func (s *statStore) NewPerInstanceGauge(name string, tags map[string]string) Gau
 	if _, found := tags["_f"]; found {
 		return s.NewGaugeWithTags(name, tags)
 	}
-	return s.newGaugeWithTagSet(name, convertTagsToPerInstanceTagSet(tags))
+	return s.newGaugeWithTagSet(name, TagSet(nil).MergePerInstanceTags(tags))
 }
 
 func (s *statStore) newTimer(serializedName string) *timer {
@@ -463,11 +445,11 @@ func (s *statStore) NewTimer(name string) Timer {
 }
 
 func (s *statStore) NewTimerWithTags(name string, tags map[string]string) Timer {
-	return s.newTimer(serializeTags(name, tags))
+	return s.newTimer(SerializeTags(name, tags))
 }
 
 func (s *statStore) newTimerWithTagSet(name string, tags TagSet) Timer {
-	return s.newTimer(serializeTagSet(name, tags))
+	return s.newTimer(tags.Serialize(name))
 }
 
 func (s *statStore) NewPerInstanceTimer(name string, tags map[string]string) Timer {
@@ -477,7 +459,7 @@ func (s *statStore) NewPerInstanceTimer(name string, tags map[string]string) Tim
 	if _, found := tags["_f"]; found {
 		return s.NewTimerWithTags(name, tags)
 	}
-	return s.newTimerWithTagSet(name, convertTagsToPerInstanceTagSet(tags))
+	return s.newTimerWithTagSet(name, TagSet(nil).MergePerInstanceTags(tags))
 }
 
 type subScope struct {
@@ -490,7 +472,7 @@ func newSubScope(registry *statStore, name string, tags map[string]string) *subS
 	a := make(TagSet, 0, len(tags))
 	for k, v := range tags {
 		if k != "" && v != "" {
-			a = append(a, Tag{key: k, value: replaceChars(v)})
+			a = append(a, Tag{Key: k, Value: ReplaceChars(v)})
 		}
 	}
 	a.Sort()
@@ -505,7 +487,7 @@ func (s *subScope) ScopeWithTags(name string, tags map[string]string) Scope {
 	return &subScope{
 		registry: s.registry,
 		name:     joinScopes(s.name, name),
-		tags:     mergeTags(s.tags, tags),
+		tags:     s.tags.MergeTags(tags),
 	}
 }
 
@@ -518,12 +500,12 @@ func (s *subScope) NewCounter(name string) Counter {
 }
 
 func (s *subScope) NewCounterWithTags(name string, tags map[string]string) Counter {
-	return s.registry.newCounterWithTagSet(joinScopes(s.name, name), mergeTags(s.tags, tags))
+	return s.registry.newCounterWithTagSet(joinScopes(s.name, name), s.tags.MergeTags(tags))
 }
 
 func (s *subScope) NewPerInstanceCounter(name string, tags map[string]string) Counter {
 	return s.registry.newCounterWithTagSet(joinScopes(s.name, name),
-		mergePerInstanceTags(s.tags, tags))
+		s.tags.MergePerInstanceTags(tags))
 }
 
 func (s *subScope) NewGauge(name string) Gauge {
@@ -531,12 +513,12 @@ func (s *subScope) NewGauge(name string) Gauge {
 }
 
 func (s *subScope) NewGaugeWithTags(name string, tags map[string]string) Gauge {
-	return s.registry.newGaugeWithTagSet(joinScopes(s.name, name), mergeTags(s.tags, tags))
+	return s.registry.newGaugeWithTagSet(joinScopes(s.name, name), s.tags.MergeTags(tags))
 }
 
 func (s *subScope) NewPerInstanceGauge(name string, tags map[string]string) Gauge {
 	return s.registry.newGaugeWithTagSet(joinScopes(s.name, name),
-		mergePerInstanceTags(s.tags, tags))
+		s.tags.MergePerInstanceTags(tags))
 }
 
 func (s *subScope) NewTimer(name string) Timer {
@@ -544,12 +526,12 @@ func (s *subScope) NewTimer(name string) Timer {
 }
 
 func (s *subScope) NewTimerWithTags(name string, tags map[string]string) Timer {
-	return s.registry.newTimerWithTagSet(joinScopes(s.name, name), mergeTags(s.tags, tags))
+	return s.registry.newTimerWithTagSet(joinScopes(s.name, name), s.tags.MergeTags(tags))
 }
 
 func (s *subScope) NewPerInstanceTimer(name string, tags map[string]string) Timer {
 	return s.registry.newTimerWithTagSet(joinScopes(s.name, name),
-		mergePerInstanceTags(s.tags, tags))
+		s.tags.MergePerInstanceTags(tags))
 }
 
 func joinScopes(parent, child string) string {

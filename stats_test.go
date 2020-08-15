@@ -55,26 +55,26 @@ func TestTimer(t *testing.T) {
 func TestNewSubScope(t *testing.T) {
 	s := randomTagSet(t, "x_", 20)
 	for i := range s {
-		s[i].value += "|" // add an invalid char
+		s[i].Value += "|" // add an invalid char
 	}
 	m := make(map[string]string)
 	for _, p := range s {
-		m[p.key] = p.value
+		m[p.Key] = p.Value
 	}
 	scope := newSubScope(nil, "name", m)
 
 	expected := make(TagSet, len(s))
 	copy(expected, s)
 	for i, p := range expected {
-		expected[i].value = replaceChars(p.value)
+		expected[i].Value = ReplaceChars(p.Value)
 	}
 
 	if !reflect.DeepEqual(scope.tags, expected) {
 		t.Errorf("tags are not sorted by key: %+v", s)
 	}
 	for i, p := range expected {
-		s := replaceChars(p.value)
-		if p.value != s {
+		s := ReplaceChars(p.Value)
+		if p.Value != s {
 			t.Errorf("failed to replace invalid chars: %d: %+v", i, p)
 		}
 	}
