@@ -729,8 +729,7 @@ func BenchmarkTagSetSearch(b *testing.B) {
 }
 
 ///////////////////////////////////////////////////////////////////
-// TAG SET TESTS !!!
-///////////////////////////////////////////////////////////////////
+// TagSet Tests
 
 func mergeTagsReference(set TagSet, tags map[string]string) TagSet {
 	a := make(TagSet, 0, len(tags))
@@ -955,6 +954,9 @@ func BenchmarkScopeMergeTags(b *testing.B) {
 		}
 	}
 }
+
+///////////////////////////////////////////////////////////////////
+// Parse Tests
 
 var parseTagsTests = []struct {
 	Stat string
