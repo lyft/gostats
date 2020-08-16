@@ -26,7 +26,7 @@ func NewTagSet(tags map[string]string) TagSet {
 	a := make(TagSet, 0, len(tags))
 	for k, v := range tags {
 		if k != "" && v != "" {
-			a = append(a, Tag{Key: k, Value: ReplaceChars(v)})
+			a = append(a, NewTag(k, v))
 		}
 	}
 	a.Sort()
@@ -304,7 +304,7 @@ func mergeTagSets(s1, s2, scratch TagSet) TagSet {
 // Serialize serializes name and tags into a statsd stat. Note: the TagSet
 // t must be sorted and have clean tag keys and values.
 func (t TagSet) Serialize(name string) string {
-	// NB: the TagSet must be sorted and have clean values
+	// TODO: panic if the set isn't sorted?
 
 	const prefix = ".__"
 	const sep = "="
@@ -347,12 +347,14 @@ func SerializeTags(name string, tags map[string]string) string {
 	case 0:
 		return name
 	case 1:
+		var t0 Tag
 		for k, v := range tags {
 			if k != "" && v != "" {
-				return name + prefix + k + sep + ReplaceChars(v)
+				t0 = NewTag(k, v)
+				break
 			}
 		}
-		panic("unreachable")
+		return name + prefix + t0.Key + sep + t0.Value
 	case 2:
 		var t0, t1 Tag
 		for k, v := range tags {

@@ -462,6 +462,21 @@ func TestMergeTagSets(t *testing.T) {
 	}
 }
 
+func TestSerializeTagSet(t *testing.T) {
+	if s := TagSet(nil).Serialize("name"); s != "name" {
+		t.Errorf("got: %q want: %q", s, "name")
+	}
+
+	const exp = "name.__k1=v1.__k2=v2"
+	set := NewTagSet(map[string]string{
+		"k1": "v1",
+		"k2": "v2",
+	})
+	if s := set.Serialize("name"); s != exp {
+		t.Errorf("got: %q want: %q", s, "name")
+	}
+}
+
 func TestNewTag(t *testing.T) {
 	exp := Tag{
 		Key:   "key",
@@ -470,6 +485,31 @@ func TestNewTag(t *testing.T) {
 	got := NewTag("key", "value.a:b|c")
 	if got != exp {
 		t.Errorf("NewTag: got: %+v want: %+v", got, exp)
+	}
+}
+
+func TestNewTagSet(t *testing.T) {
+	m := map[string]string{
+		"x":     "x",
+		"y":     "y",
+		"z":     "z",
+		"c":     "c|",
+		"b":     "b:",
+		"a":     "a.",
+		"":      "empty",
+		"empty": "",
+	}
+	exp := TagSet{
+		{"a", "a_"},
+		{"b", "b_"},
+		{"c", "c_"},
+		{"x", "x"},
+		{"y", "y"},
+		{"z", "z"},
+	}
+	got := NewTagSet(m)
+	if !reflect.DeepEqual(got, exp) {
+		t.Errorf("NewTagSet: got: %+v want: %+v", got, exp)
 	}
 }
 
