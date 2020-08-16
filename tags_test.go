@@ -380,6 +380,17 @@ func TestTagInsert(t *testing.T) {
 		}
 	})
 
+	t.Run("CopyEqualKey", func(t *testing.T) {
+		t1 := TagSet{{"k", "v1"}}
+		t2 := t1.Insert(Tag{"k", "v2"})
+		if &t1[0] == &t2[0] {
+			t.Errorf("Copy: %p -- %p",
+				(*uintptr)(unsafe.Pointer(&t1[0])),
+				(*uintptr)(unsafe.Pointer(&t2[0])),
+			)
+		}
+	})
+
 	t.Run("Copy", func(t *testing.T) {
 		t1 := make(TagSet, 0, 2)
 		t1 = append(t1, Tag{"k1", "v1"})
@@ -456,6 +467,17 @@ func TestMergeTagSets(t *testing.T) {
 			t.Errorf("merging %d tagSets failed\n# Got:\n%+v\n# Want:\n%+v\n# S1:\n%+v\n# S2:\n%+v\n",
 				i, got, expected, s1, s2)
 		}
+	}
+}
+
+func TestNewTag(t *testing.T) {
+	exp := Tag{
+		Key:   "key",
+		Value: ReplaceChars("value.a:b|c"),
+	}
+	got := NewTag("key", "value.a:b|c")
+	if got != exp {
+		t.Errorf("NewTag: got: %+v want: %+v", got, exp)
 	}
 }
 

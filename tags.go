@@ -5,11 +5,20 @@ import (
 	"unsafe"
 )
 
+// A Tag is a Key/Value statsd tag.
 type Tag struct {
 	Key   string
 	Value string
 }
 
+// NewTag returns a new Tag with any invalid chars in the value replaced.
+func NewTag(key, value string) Tag {
+	return Tag{Key: key, Value: ReplaceChars(value)}
+}
+
+// A TagSet is a collection of Tags. All methods apart from Sort() require the
+// TagSet to be sorted. Tags with empty keys or values should never be inserted
+// into the TagSet since most methods rely on all the tags being valid.
 type TagSet []Tag
 
 func (t TagSet) Len() int           { return len(t) }
@@ -24,7 +33,7 @@ func (t TagSet) cas(i, j int) {
 	}
 }
 
-// Sort sorts the tagSet in place and is optimized for small (N <= 8) tagSets.
+// Sort sorts the TagSet in place and is optimized for small (N <= 8) TagSets.
 func (t TagSet) Sort() {
 	// network sort generated with: https://pages.ripco.net/~jgamble/nw.html
 	// using "best": https://metacpan.org/pod/Algorithm::Networksort::Best
@@ -127,7 +136,7 @@ func (t TagSet) Search(key string) int {
 	return i
 }
 
-// Contains returns if the tagSet contains key.
+// Contains returns if the TagSet contains key.
 func (t TagSet) Contains(key string) bool {
 	if len(t) == 0 {
 		return false
@@ -136,7 +145,8 @@ func (t TagSet) Contains(key string) bool {
 	return i < len(t) && t[i].Key == key
 }
 
-// Inserts Tag p into TagSet t, returning a copy unless Tag p already existed.
+// Insert inserts Tag p into TagSet t, returning a copy unless Tag p already
+// existed.
 func (t TagSet) Insert(p Tag) TagSet {
 	if len(t) == 0 {
 		return TagSet{p}
@@ -161,7 +171,7 @@ func (t TagSet) Insert(p Tag) TagSet {
 	return a
 }
 
-// MergeTags returns a tagSet that is the union of subScope's tags and the
+// MergeTags returns a TagSet that is the union of subScope's tags and the
 // provided tags map. If any keys overlap the values from the provided map
 // are used.
 func (t TagSet) MergeTags(tags map[string]string) TagSet {
@@ -178,7 +188,7 @@ func (t TagSet) MergeTags(tags map[string]string) TagSet {
 		i := 0
 		for k, v := range tags {
 			if k != "" && v != "" {
-				a[i] = Tag{Key: k, Value: ReplaceChars(v)}
+				a[i] = NewTag(k, v)
 				i++
 			}
 		}
@@ -199,7 +209,7 @@ func mergeOneTag(set TagSet, tags map[string]string) TagSet {
 	}
 	var p Tag
 	for k, v := range tags {
-		p = Tag{Key: k, Value: ReplaceChars(v)}
+		p = NewTag(k, v)
 		break
 	}
 	if p.Key == "" || p.Value == "" {
@@ -227,10 +237,6 @@ func (t TagSet) MergePerInstanceTags(tags map[string]string) TagSet {
 		return t.Insert(Tag{Key: "_f", Value: "i"})
 	}
 
-	// TODO:
-	// 	1. do we keep the old "_f" tag?
-	// 	2. clean this up - we don't need to call Contains() twice
-
 	// write tags to the end of scratch slice
 	scratch := make(TagSet, len(t)+len(tags)+1)
 	a := scratch[len(t):]
@@ -242,7 +248,7 @@ func (t TagSet) MergePerInstanceTags(tags map[string]string) TagSet {
 	}
 	for k, v := range tags {
 		if k != "" && v != "" {
-			a[i] = Tag{Key: k, Value: ReplaceChars(v)}
+			a[i] = NewTag(k, v)
 			i++
 		}
 	}
@@ -283,7 +289,7 @@ func mergeTagSets(s1, s2, scratch TagSet) TagSet {
 	return a[:k]
 }
 
-// SerializeTags serializes name and tags into a statsd stat. Note: the TagSet
+// Serialize serializes name and tags into a statsd stat. Note: the TagSet
 // t must be sorted and have clean tag keys and values.
 func (t TagSet) Serialize(name string) string {
 	// NB: the TagSet must be sorted and have clean values
@@ -342,7 +348,7 @@ func SerializeTags(name string, tags map[string]string) string {
 				continue
 			}
 			t1 = t0
-			t0 = Tag{k, ReplaceChars(v)}
+			t0 = NewTag(k, v)
 		}
 		if t0.Key > t1.Key {
 			t0, t1 = t1, t0
@@ -357,7 +363,7 @@ func SerializeTags(name string, tags map[string]string) string {
 			}
 			t2 = t1
 			t1 = t0
-			t0 = Tag{k, ReplaceChars(v)}
+			t0 = NewTag(k, v)
 		}
 		if t1.Key > t2.Key {
 			t1, t2 = t2, t1
@@ -380,7 +386,7 @@ func SerializeTags(name string, tags map[string]string) string {
 			t3 = t2
 			t2 = t1
 			t1 = t0
-			t0 = Tag{k, ReplaceChars(v)}
+			t0 = NewTag(k, v)
 		}
 		if t0.Key > t1.Key {
 			t0, t1 = t1, t0
@@ -412,10 +418,7 @@ func SerializeTags(name string, tags map[string]string) string {
 				continue
 			}
 			n += len(k) + len(v)
-			pairs = append(pairs, Tag{
-				Key:   k,
-				Value: ReplaceChars(v),
-			})
+			pairs = append(pairs, NewTag(k, v))
 		}
 		sort.Sort(pairs)
 
