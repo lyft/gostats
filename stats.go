@@ -6,6 +6,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	tagspkg "github.com/lyft/gostats/internal/tags"
 	logger "github.com/sirupsen/logrus"
 )
 
@@ -377,10 +378,10 @@ func (s *statStore) NewCounter(name string) Counter {
 }
 
 func (s *statStore) NewCounterWithTags(name string, tags map[string]string) Counter {
-	return s.newCounter(SerializeTags(name, tags))
+	return s.newCounter(tagspkg.SerializeTags(name, tags))
 }
 
-func (s *statStore) newCounterWithTagSet(name string, tags TagSet) Counter {
+func (s *statStore) newCounterWithTagSet(name string, tags tagspkg.TagSet) Counter {
 	return s.newCounter(tags.Serialize(name))
 }
 
@@ -393,7 +394,7 @@ func (s *statStore) NewPerInstanceCounter(name string, tags map[string]string) C
 	if _, found := tags["_f"]; found {
 		return s.NewCounterWithTags(name, tags)
 	}
-	return s.newCounterWithTagSet(name, TagSet(nil).MergePerInstanceTags(tags))
+	return s.newCounterWithTagSet(name, tagspkg.TagSet(nil).MergePerInstanceTags(tags))
 }
 
 func (s *statStore) newGauge(serializedName string) *gauge {
@@ -412,10 +413,10 @@ func (s *statStore) NewGauge(name string) Gauge {
 }
 
 func (s *statStore) NewGaugeWithTags(name string, tags map[string]string) Gauge {
-	return s.newGauge(SerializeTags(name, tags))
+	return s.newGauge(tagspkg.SerializeTags(name, tags))
 }
 
-func (s *statStore) newGaugeWithTagSet(name string, tags TagSet) Gauge {
+func (s *statStore) newGaugeWithTagSet(name string, tags tagspkg.TagSet) Gauge {
 	return s.newGauge(tags.Serialize(name))
 }
 
@@ -426,7 +427,7 @@ func (s *statStore) NewPerInstanceGauge(name string, tags map[string]string) Gau
 	if _, found := tags["_f"]; found {
 		return s.NewGaugeWithTags(name, tags)
 	}
-	return s.newGaugeWithTagSet(name, TagSet(nil).MergePerInstanceTags(tags))
+	return s.newGaugeWithTagSet(name, tagspkg.TagSet(nil).MergePerInstanceTags(tags))
 }
 
 func (s *statStore) newTimer(serializedName string) *timer {
@@ -445,10 +446,10 @@ func (s *statStore) NewTimer(name string) Timer {
 }
 
 func (s *statStore) NewTimerWithTags(name string, tags map[string]string) Timer {
-	return s.newTimer(SerializeTags(name, tags))
+	return s.newTimer(tagspkg.SerializeTags(name, tags))
 }
 
-func (s *statStore) newTimerWithTagSet(name string, tags TagSet) Timer {
+func (s *statStore) newTimerWithTagSet(name string, tags tagspkg.TagSet) Timer {
 	return s.newTimer(tags.Serialize(name))
 }
 
@@ -459,24 +460,17 @@ func (s *statStore) NewPerInstanceTimer(name string, tags map[string]string) Tim
 	if _, found := tags["_f"]; found {
 		return s.NewTimerWithTags(name, tags)
 	}
-	return s.newTimerWithTagSet(name, TagSet(nil).MergePerInstanceTags(tags))
+	return s.newTimerWithTagSet(name, tagspkg.TagSet(nil).MergePerInstanceTags(tags))
 }
 
 type subScope struct {
 	registry *statStore
 	name     string
-	tags     TagSet // read-only and may be shared by multiple subScopes
+	tags     tagspkg.TagSet // read-only and may be shared by multiple subScopes
 }
 
 func newSubScope(registry *statStore, name string, tags map[string]string) *subScope {
-	a := make(TagSet, 0, len(tags))
-	for k, v := range tags {
-		if k != "" && v != "" {
-			a = append(a, Tag{Key: k, Value: ReplaceChars(v)})
-		}
-	}
-	a.Sort()
-	return &subScope{registry: registry, name: name, tags: a}
+	return &subScope{registry: registry, name: name, tags: tagspkg.NewTagSet(tags)}
 }
 
 func (s *subScope) Scope(name string) Scope {

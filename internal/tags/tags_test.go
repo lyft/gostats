@@ -1,13 +1,10 @@
-package stats
+package tags
 
 import (
-	"bufio"
 	"bytes"
 	crand "crypto/rand"
-	"encoding/base64"
 	"encoding/hex"
 	"fmt"
-	"io"
 	"math/rand"
 	"reflect"
 	"runtime"
@@ -84,16 +81,11 @@ func TestSerializeTagsNetworkSort(t *testing.T) {
 	const name = "prefix"
 
 	rand.Seed(time.Now().UnixNano())
-	buf := bufio.NewReader(crand.Reader)
 	seen := make(map[string]bool)
 
-	randomString := func() string {
+	randString := func() string {
 		for i := 0; i < 100; i++ {
-			b := make([]byte, rand.Intn(30)+1)
-			if _, err := buf.Read(b); err != nil {
-				t.Fatal(err)
-			}
-			s := base64.StdEncoding.EncodeToString(b)
+			s := randomString(t, rand.Intn(30)+1)
 			if !seen[s] {
 				seen[s] = true
 				return s
@@ -106,8 +98,8 @@ func TestSerializeTagsNetworkSort(t *testing.T) {
 	makeTags := func(n int) map[string]string {
 		m := make(map[string]string, n)
 		for i := 0; i < n; i++ {
-			k := randomString()
-			v := randomString()
+			k := randString()
+			v := randString()
 			m[k] = v
 		}
 		return m
@@ -306,9 +298,9 @@ func TestTagSort(t *testing.T) {
 		}
 		for i := 0; i < 5; i++ {
 			for {
-				s := RandomString(t, 10)
+				s := randomString(t, 10)
 				if !contains(s, tags) {
-					keys = append(keys, RandomString(t, 10))
+					keys = append(keys, randomString(t, 10))
 					break
 				}
 			}
@@ -344,7 +336,7 @@ func randomTagSet(t testing.TB, valPrefix string, size int) TagSet {
 	s := make(TagSet, size)
 	for i := 0; i < len(s); i++ {
 		s[i] = Tag{
-			Key:   RandomString(t, 32),
+			Key:   randomString(t, 32),
 			Value: fmt.Sprintf("%s%d", valPrefix, i),
 		}
 	}
@@ -880,109 +872,12 @@ func TestMergeOneTagPanic(t *testing.T) {
 	mergeOneTag(TagSet{}, tags)
 }
 
-func BenchmarkStore_MutexContention(b *testing.B) {
-	s := NewStore(nullSink{}, false)
-	t := time.NewTicker(500 * time.Microsecond) // we want flush to contend with accessing metrics
-	defer t.Stop()
-	go s.Start(t)
-
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
-		bmID := strconv.Itoa(rand.Intn(1000))
-		c := s.NewCounter(bmID)
-		c.Inc()
-		_ = c.Value()
-	}
-}
-
-func BenchmarkStore_NewCounterWithTags(b *testing.B) {
-	s := NewStore(nullSink{}, false)
-	t := time.NewTicker(time.Hour) // don't flush
-	defer t.Stop()
-	go s.Start(t)
-	tags := map[string]string{
-		"tag1": "val1",
-		"tag2": "val2",
-		"tag3": "val3",
-		"tag4": "val4",
-		"tag5": "val5",
-	}
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
-		s.NewCounterWithTags("counter_name", tags)
-	}
-}
-
-func initBenchScope() (scope Scope, childTags map[string]string) {
-	s := NewStore(nullSink{}, false)
-
-	scopeTags := make(map[string]string, 5)
-	childTags = make(map[string]string, 5)
-
-	for i := 0; i < 5; i++ {
-		tag := fmt.Sprintf("%dtag", i)
-		val := fmt.Sprintf("%dval", i)
-		scopeTags[tag] = val
-		childTags["c"+tag] = "c" + val
-	}
-
-	scope = s.ScopeWithTags("scope", scopeTags)
-	return
-}
-
-func BenchmarkStore_ScopeWithTags(b *testing.B) {
-	scope, childTags := initBenchScope()
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
-		scope.NewCounterWithTags("counter_name", childTags)
-	}
-}
-
-func BenchmarkStore_ScopeNoTags(b *testing.B) {
-	scope, _ := initBenchScope()
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
-		scope.NewCounterWithTags("counter_name", nil)
-	}
-}
-
-var randReader = struct {
-	*bufio.Reader
-	*sync.Mutex
-}{
-	Reader: bufio.NewReaderSize(crand.Reader, 1024*64),
-	Mutex:  new(sync.Mutex),
-}
-
-func RandomString(tb testing.TB, size int) string {
+func randomString(tb testing.TB, size int) string {
 	b := make([]byte, hex.DecodedLen(size))
-	randReader.Lock()
-	defer randReader.Unlock()
-	if _, err := io.ReadFull(randReader, b); err != nil {
+	if _, err := crand.Read(b); err != nil {
 		tb.Fatal(err)
 	}
 	return hex.EncodeToString(b)
-}
-
-func BenchmarkParallelCounter(b *testing.B) {
-	const N = 1000
-	keys := make([]string, N)
-	for i := 0; i < len(keys); i++ {
-		keys[i] = RandomString(b, 32)
-	}
-
-	s := NewStore(nullSink{}, false)
-	t := time.NewTicker(time.Hour) // don't flush
-	defer t.Stop()                 // never sends
-	go s.Start(t)
-
-	b.ResetTimer()
-	b.RunParallel(func(pb *testing.PB) {
-		n := 0
-		for pb.Next() {
-			s.NewCounter(keys[n%N]).Inc()
-		}
-	})
 }
 
 // TODO: rename this once we rename the mergePairs method
@@ -1019,32 +914,4 @@ func BenchmarkScopeMergeTags(b *testing.B) {
 			})
 		}
 	}
-}
-
-func BenchmarkStoreNewPerInstanceCounter(b *testing.B) {
-	b.Run("HasTag", func(b *testing.B) {
-		var store statStore
-		tags := map[string]string{
-			"1":  "1",
-			"2":  "2",
-			"3":  "3",
-			"_f": "xxx",
-		}
-		for i := 0; i < b.N; i++ {
-			store.NewPerInstanceCounter("name", tags)
-		}
-	})
-
-	b.Run("MissingTag", func(b *testing.B) {
-		var store statStore
-		tags := map[string]string{
-			"1": "1",
-			"2": "2",
-			"3": "3",
-			"4": "4",
-		}
-		for i := 0; i < b.N; i++ {
-			store.NewPerInstanceCounter("name", tags)
-		}
-	})
 }

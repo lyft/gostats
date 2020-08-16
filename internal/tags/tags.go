@@ -1,4 +1,4 @@
-package stats
+package tags
 
 import (
 	"sort"
@@ -20,6 +20,18 @@ func NewTag(key, value string) Tag {
 // TagSet to be sorted. Tags with empty keys or values should never be inserted
 // into the TagSet since most methods rely on all the tags being valid.
 type TagSet []Tag
+
+// NewTagSet returns a new TagSet from the tags map.
+func NewTagSet(tags map[string]string) TagSet {
+	a := make(TagSet, 0, len(tags))
+	for k, v := range tags {
+		if k != "" && v != "" {
+			a = append(a, Tag{Key: k, Value: ReplaceChars(v)})
+		}
+	}
+	a.Sort()
+	return a
+}
 
 func (t TagSet) Len() int           { return len(t) }
 func (t TagSet) Swap(i, j int)      { t[i], t[j] = t[j], t[i] }

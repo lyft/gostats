@@ -1,12 +1,18 @@
 package stats
 
 import (
+	crand "crypto/rand"
+	"encoding/hex"
+	"fmt"
+	"math/rand"
 	"reflect"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
 	"time"
 
+	tagspkg "github.com/lyft/gostats/internal/tags"
 	"github.com/lyft/gostats/mock"
 )
 
@@ -52,6 +58,23 @@ func TestTimer(t *testing.T) {
 	}
 }
 
+func randomString(tb testing.TB, size int) string {
+	b := make([]byte, hex.DecodedLen(size))
+	if _, err := crand.Read(b); err != nil {
+		tb.Fatal(err)
+	}
+	return hex.EncodeToString(b)
+}
+
+func randomTagSet(t testing.TB, valPrefix string, size int) tagspkg.TagSet {
+	s := make(tagspkg.TagSet, size)
+	for i := 0; i < len(s); i++ {
+		s[i] = tagspkg.NewTag(randomString(t, 32), fmt.Sprintf("%s%d", valPrefix, i))
+	}
+	s.Sort()
+	return s
+}
+
 func TestNewSubScope(t *testing.T) {
 	s := randomTagSet(t, "x_", 20)
 	for i := range s {
@@ -63,17 +86,16 @@ func TestNewSubScope(t *testing.T) {
 	}
 	scope := newSubScope(nil, "name", m)
 
-	expected := make(TagSet, len(s))
-	copy(expected, s)
-	for i, p := range expected {
-		expected[i].Value = ReplaceChars(p.Value)
+	expected := make(tagspkg.TagSet, len(s))
+	for i, p := range s {
+		expected[i] = tagspkg.NewTag(p.Key, p.Value)
 	}
 
 	if !reflect.DeepEqual(scope.tags, expected) {
 		t.Errorf("tags are not sorted by key: %+v", s)
 	}
 	for i, p := range expected {
-		s := ReplaceChars(p.Value)
+		s := tagspkg.ReplaceChars(p.Value)
 		if p.Value != s {
 			t.Errorf("failed to replace invalid chars: %d: %+v", i, p)
 		}
@@ -304,5 +326,120 @@ func TestPerInstanceStats(t *testing.T) {
 		}
 
 		testPerInstanceMethods(t, store)
+	})
+}
+
+func BenchmarkStore_MutexContention(b *testing.B) {
+	s := NewStore(nullSink{}, false)
+	t := time.NewTicker(500 * time.Microsecond) // we want flush to contend with accessing metrics
+	defer t.Stop()
+	go s.Start(t)
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		bmID := strconv.Itoa(rand.Intn(1000))
+		c := s.NewCounter(bmID)
+		c.Inc()
+		_ = c.Value()
+	}
+}
+
+func BenchmarkStore_NewCounterWithTags(b *testing.B) {
+	s := NewStore(nullSink{}, false)
+	t := time.NewTicker(time.Hour) // don't flush
+	defer t.Stop()
+	go s.Start(t)
+	tags := map[string]string{
+		"tag1": "val1",
+		"tag2": "val2",
+		"tag3": "val3",
+		"tag4": "val4",
+		"tag5": "val5",
+	}
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		s.NewCounterWithTags("counter_name", tags)
+	}
+}
+
+func initBenchScope() (scope Scope, childTags map[string]string) {
+	s := NewStore(nullSink{}, false)
+
+	scopeTags := make(map[string]string, 5)
+	childTags = make(map[string]string, 5)
+
+	for i := 0; i < 5; i++ {
+		tag := fmt.Sprintf("%dtag", i)
+		val := fmt.Sprintf("%dval", i)
+		scopeTags[tag] = val
+		childTags["c"+tag] = "c" + val
+	}
+
+	scope = s.ScopeWithTags("scope", scopeTags)
+	return
+}
+
+func BenchmarkStore_ScopeWithTags(b *testing.B) {
+	scope, childTags := initBenchScope()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		scope.NewCounterWithTags("counter_name", childTags)
+	}
+}
+
+func BenchmarkStore_ScopeNoTags(b *testing.B) {
+	scope, _ := initBenchScope()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		scope.NewCounterWithTags("counter_name", nil)
+	}
+}
+
+func BenchmarkParallelCounter(b *testing.B) {
+	const N = 1000
+	keys := make([]string, N)
+	for i := 0; i < len(keys); i++ {
+		keys[i] = randomString(b, 32)
+	}
+
+	s := NewStore(nullSink{}, false)
+	t := time.NewTicker(time.Hour) // don't flush
+	defer t.Stop()                 // never sends
+	go s.Start(t)
+
+	b.ResetTimer()
+	b.RunParallel(func(pb *testing.PB) {
+		n := 0
+		for pb.Next() {
+			s.NewCounter(keys[n%N]).Inc()
+		}
+	})
+}
+
+func BenchmarkStoreNewPerInstanceCounter(b *testing.B) {
+	b.Run("HasTag", func(b *testing.B) {
+		var store statStore
+		tags := map[string]string{
+			"1":  "1",
+			"2":  "2",
+			"3":  "3",
+			"_f": "xxx",
+		}
+		for i := 0; i < b.N; i++ {
+			store.NewPerInstanceCounter("name", tags)
+		}
+	})
+
+	b.Run("MissingTag", func(b *testing.B) {
+		var store statStore
+		tags := map[string]string{
+			"1": "1",
+			"2": "2",
+			"3": "3",
+			"4": "4",
+		}
+		for i := 0; i < b.N; i++ {
+			store.NewPerInstanceCounter("name", tags)
+		}
 	})
 }
