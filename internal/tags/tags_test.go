@@ -955,3 +955,94 @@ func BenchmarkScopeMergeTags(b *testing.B) {
 		}
 	}
 }
+
+var parseTagsTests = []struct {
+	Stat string
+	Name string
+	Tags map[string]string
+}{
+	{
+		Stat: "",
+		Name: "",
+	},
+	{
+		Stat: "prefix.name",
+		Name: "prefix.name",
+	},
+	{
+		Stat: "prefix.c.___f=i.__tag1=value1:12|c\n",
+		Name: "prefix.c",
+		Tags: map[string]string{
+			"_f":   "i",
+			"tag1": "value1",
+		},
+	},
+	// malformed
+	{
+		Stat: "invalid.__tag1=value1.__tag2",
+		Name: "invalid",
+		Tags: map[string]string{
+			"tag1": "value1",
+		},
+	},
+	{
+		Stat: "invalid.__tag1.__tag2=value2",
+		Name: "invalid",
+		Tags: map[string]string{
+			"tag2": "value2",
+		},
+	},
+	{
+		Stat: "invalid.__tag1=.__tag2=value2",
+		Name: "invalid",
+		Tags: map[string]string{
+			"tag1": "",
+			"tag2": "value2",
+		},
+	},
+}
+
+func TestRemoveStatValue(t *testing.T) {
+	tests := map[string]string{
+		"":                                     "",
+		"a":                                    "a",
+		"a:b:12|c\n":                           "a:b", // likely invalid, but handle it
+		"prefix.c.___f=i.__tag1=value1:12|c\n": "prefix.c.___f=i.__tag1=value1",
+		"prefix.c.___f=i.__tag1=value1":        "prefix.c.___f=i.__tag1=value1",
+	}
+	for in, exp := range tests {
+		got := removeStatValue(in)
+		if got != exp {
+			t.Errorf("%q: got: %q want: %q", in, got, exp)
+		}
+	}
+}
+
+func TestParseTags(t *testing.T) {
+	for _, x := range parseTagsTests {
+		s, m := ParseTags(x.Stat)
+		if s != x.Name {
+			t.Errorf("%+v: Name: got: %q want: %q", x, s, x.Name)
+		}
+		if !tagMapsEqual(m, x.Tags) {
+			t.Errorf("%+v: Tags: got: %q want: %q", x, m, x.Tags)
+		}
+	}
+}
+
+func TestParseTagSet(t *testing.T) {
+	for _, x := range parseTagsTests {
+		s, set := ParseTagSet(x.Stat)
+		if s != x.Name {
+			t.Errorf("%+v: Name: got: %q want: %q", x, s, x.Name)
+		}
+		exp := make(TagSet, 0, len(x.Tags))
+		for k, v := range x.Tags {
+			exp = append(exp, Tag{Key: k, Value: v})
+		}
+		exp.Sort()
+		if !tagSetEqual(set, exp) {
+			t.Errorf("%+v: Tags: got: %q want: %q", x, set, exp)
+		}
+	}
+}

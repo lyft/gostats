@@ -2,6 +2,7 @@ package tags
 
 import (
 	"sort"
+	"strings"
 	"unsafe"
 )
 
@@ -465,4 +466,109 @@ func ReplaceChars(s string) string {
 		return s
 	}
 	return *(*string)(unsafe.Pointer(&buf))
+}
+
+// removeStatValue removes the value from a stat line
+func removeStatValue(s string) string {
+	i := strings.IndexByte(s, ':')
+	if i == -1 {
+		return s
+	}
+	n := i
+	i++
+	for i < len(s) {
+		if s[i] == ':' {
+			n = i
+		}
+		i++
+	}
+	return s[:n]
+}
+
+// ParseTags parses the statsd stat name and tags (if any) from stat.
+func ParseTags(stat string) (string, map[string]string) {
+	const sep = ".__"
+
+	// Remove the value, if any. This allows passing full stat
+	// lines in wire form as they would be emitted by the sink.
+	stat = removeStatValue(stat)
+
+	o := strings.Index(stat, sep)
+	if o == -1 {
+		return stat, nil // no tags
+	}
+	name := stat[:o]
+
+	// consume first sep
+	s := stat[o+len(sep):]
+
+	n := strings.Count(s, sep)
+	tags := make(map[string]string, n+1)
+
+	for ; n > 0; n-- {
+		m := strings.Index(s, sep)
+		if m < 0 {
+			break
+		}
+		a := s[:m]
+		if o := strings.IndexByte(a, '='); o != -1 {
+			tags[a[:o]] = a[o+1:]
+		}
+		s = s[m+len(sep):]
+	}
+	if o := strings.IndexByte(s, '='); o != -1 {
+		tags[s[:o]] = s[o+1:]
+	}
+	return name, tags
+}
+
+// ParseTags parses the statsd stat name and tags (if any) from stat. It is
+// like ParseTags, but returns a TagSet instead of a map[string]string.
+func ParseTagSet(stat string) (string, TagSet) {
+	const sep = ".__"
+
+	// Remove the value, if any. This allows passing full stat
+	// lines in wire form as they would be emitted by the sink.
+	stat = removeStatValue(stat)
+
+	o := strings.Index(stat, sep)
+	if o == -1 {
+		return stat, nil // no tags
+	}
+	name := stat[:o]
+
+	// consume first sep
+	s := stat[o+len(sep):]
+
+	n := strings.Count(s, sep)
+	tags := make(TagSet, n+1)
+
+	i := 0
+	for n > 0 {
+		m := strings.Index(s, sep)
+		if m < 0 {
+			break
+		}
+		// TODO: handle malformed stats ???
+		a := s[:m]
+		if o := strings.IndexByte(a, '='); o != -1 {
+			tags[i] = Tag{
+				Key:   a[:o],
+				Value: a[o+1:], // don't clean the stat
+			}
+			i++
+		}
+		s = s[m+len(sep):]
+		n--
+	}
+	if o := strings.IndexByte(s, '='); o != -1 {
+		tags[i] = Tag{
+			Key:   s[:o],
+			Value: s[o+1:],
+		}
+		i++
+	}
+	tags = tags[:i]
+	tags.Sort()
+	return name, tags
 }
