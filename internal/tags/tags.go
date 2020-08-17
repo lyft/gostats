@@ -522,7 +522,7 @@ func ParseTags(stat string) (string, map[string]string) {
 	return name, tags
 }
 
-// ParseTags parses the statsd stat name and tags (if any) from stat. It is
+// ParseTagSet parses the statsd stat name and tags (if any) from stat. It is
 // like ParseTags, but returns a TagSet instead of a map[string]string.
 func ParseTagSet(stat string) (string, TagSet) {
 	const sep = ".__"
