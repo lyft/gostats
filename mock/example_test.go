@@ -3,6 +3,7 @@ package mock_test
 import (
 	"fmt"
 	"reflect"
+	"testing"
 
 	stats "github.com/lyft/gostats"
 	"github.com/lyft/gostats/mock"
@@ -64,4 +65,11 @@ func ExampleFatal() {
 	store.NewCounter("c").Set(2)
 	store.Flush()
 
+	// In real test code you would use the *testing.T or *testing.B
+	// passed to the test function.
+	t := &testing.T{}
+
+	// This will cause the test to immediately fail with .Fatal()
+	// if the assertion is false.
+	sink.AssertCounterEquals(mock.Fatal(t), "c", 2)
 }
