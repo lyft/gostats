@@ -6,6 +6,8 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
+
+	"github.com/lyft/gostats/internal/tags"
 )
 
 type entry struct {
@@ -389,4 +391,36 @@ func Fatal(tb testing.TB) testing.TB {
 	default:
 		panic(fmt.Sprintf("invalid type for testing.TB: %T", tb))
 	}
+}
+
+// ParseTags extracts the name and tags from a statsd stat.
+//
+// Example of parsing tags and the stat name from a statsd stat:
+//
+//	expected := map[string]string{
+//		"_f":   "i",
+//		"tag1": "value1",
+//	}
+//	name, tags := mock.ParseTags("prefix.c.___f=i.__tag1=value1")
+//	if name != "panic.c" {
+//		panic(fmt.Sprintf("Name: got: %q want: %q", name, "panic.c"))
+//	}
+//	if !reflect.DeepEqual(tags, expected) {
+//		panic(fmt.Sprintf("Tags: got: %q want: %q", tags, expected))
+//	}
+//
+func ParseTags(stat string) (string, map[string]string) {
+	return tags.ParseTags(stat)
+}
+
+// SerializeTags serializes name and tags into a statsd stat.
+//
+//	tags := map[string]string{
+//		"key_1": "val_1"
+//		"key_2": "val_2"
+//	}
+//	s.AssertCounterExists(tb, SerializeTags("name", tags))
+//
+func SerializeTags(name string, tagsm map[string]string) string {
+	return tags.SerializeTags(name, tagsm)
 }

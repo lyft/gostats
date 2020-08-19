@@ -1,10 +1,9 @@
-package stats
+package tags
 
 import (
-	"bufio"
 	"bytes"
 	crand "crypto/rand"
-	"encoding/base64"
+	"encoding/hex"
 	"fmt"
 	"math/rand"
 	"reflect"
@@ -14,6 +13,7 @@ import (
 	"sync"
 	"testing"
 	"time"
+	"unsafe"
 )
 
 // Reference serializeTags implementation
@@ -23,17 +23,17 @@ func serializeTagsReference(name string, tags map[string]string) string {
 	if len(tags) == 0 {
 		return name
 	}
-	tagPairs := make([]tagPair, 0, len(tags))
+	tagPairs := make([]Tag, 0, len(tags))
 	for tagKey, tagValue := range tags {
-		tagValue = replaceChars(tagValue)
-		tagPairs = append(tagPairs, tagPair{tagKey, tagValue})
+		tagValue = ReplaceChars(tagValue)
+		tagPairs = append(tagPairs, Tag{tagKey, tagValue})
 	}
-	sort.Sort(tagSet(tagPairs))
+	sort.Sort(TagSet(tagPairs))
 
 	buf := new(bytes.Buffer)
 	for _, tag := range tagPairs {
-		if tag.key != "" && tag.value != "" {
-			fmt.Fprint(buf, prefix, tag.key, sep, tag.value)
+		if tag.Key != "" && tag.Value != "" {
+			fmt.Fprint(buf, prefix, tag.Key, sep, tag.Value)
 		}
 	}
 	return name + buf.String()
@@ -43,7 +43,7 @@ func TestSerializeTags(t *testing.T) {
 	const name = "prefix"
 	const expected = name + ".__q=r.__zzz=hello"
 	tags := map[string]string{"zzz": "hello", "q": "r"}
-	serialized := serializeTags(name, tags)
+	serialized := SerializeTags(name, tags)
 	if serialized != expected {
 		t.Errorf("Serialized output (%s) didn't match expected output: %s",
 			serialized, expected)
@@ -66,7 +66,7 @@ func TestSerializeTagsReference(t *testing.T) {
 	for i := 0; i < 100; i++ {
 		tags := makeTags(i)
 		expected := serializeTagsReference(name, tags)
-		serialized := serializeTags(name, tags)
+		serialized := SerializeTags(name, tags)
 		if serialized != expected {
 			t.Errorf("%d Serialized output (%s) didn't match expected output: %s",
 				i, serialized, expected)
@@ -81,16 +81,11 @@ func TestSerializeTagsNetworkSort(t *testing.T) {
 	const name = "prefix"
 
 	rand.Seed(time.Now().UnixNano())
-	buf := bufio.NewReader(crand.Reader)
 	seen := make(map[string]bool)
 
-	randomString := func() string {
+	randString := func() string {
 		for i := 0; i < 100; i++ {
-			b := make([]byte, rand.Intn(30)+1)
-			if _, err := buf.Read(b); err != nil {
-				t.Fatal(err)
-			}
-			s := base64.StdEncoding.EncodeToString(b)
+			s := randomString(t, rand.Intn(30)+1)
 			if !seen[s] {
 				seen[s] = true
 				return s
@@ -103,8 +98,8 @@ func TestSerializeTagsNetworkSort(t *testing.T) {
 	makeTags := func(n int) map[string]string {
 		m := make(map[string]string, n)
 		for i := 0; i < n; i++ {
-			k := randomString()
-			v := randomString()
+			k := randString()
+			v := randString()
 			m[k] = v
 		}
 		return m
@@ -117,7 +112,7 @@ func TestSerializeTagsNetworkSort(t *testing.T) {
 		for i := 0; i < 10; i++ {
 			tags := makeTags(i)
 			expected := serializeTagsReference(name, tags)
-			serialized := serializeTags(name, tags)
+			serialized := SerializeTags(name, tags)
 			if serialized != expected {
 				t.Errorf("%d Serialized output (%s) didn't match expected output: %s",
 					i, serialized, expected)
@@ -141,7 +136,7 @@ func TestSerializeTagsInvalidKeyValue(t *testing.T) {
 			orig[k] = v
 		}
 
-		s := serializeTags("name", tags)
+		s := SerializeTags("name", tags)
 		if s != expected {
 			t.Errorf("Serialized output (%s) didn't match expected output: %s",
 				s, expected)
@@ -168,7 +163,7 @@ func TestSerializeTagsInvalidKeyValue(t *testing.T) {
 			orig[k] = v
 		}
 
-		got := serializeTags("name", tags)
+		got := SerializeTags("name", tags)
 		exp := serializeTagsReference("name", tags)
 		if got != exp {
 			t.Errorf("Tags (%d) got: %q want: %q", len(tags), got, exp)
@@ -230,7 +225,7 @@ func TestSerializeTagsInvalidKeyValue_ThreadSafe(t *testing.T) {
 		go func() {
 			defer wg.Done()
 			<-start
-			serializeTags("name", tags)
+			SerializeTags("name", tags)
 		}()
 	}
 	close(start)
@@ -245,7 +240,7 @@ func TestSerializeWithPerInstanceFlag(t *testing.T) {
 	const name = "prefix"
 	const expected = name + ".___f=i.__foo=bar"
 	tags := map[string]string{"foo": "bar", "_f": "i"}
-	serialized := serializeTags(name, tags)
+	serialized := SerializeTags(name, tags)
 	if serialized != expected {
 		t.Errorf("Serialized output (%s) didn't match expected output: %s",
 			serialized, expected)
@@ -256,7 +251,7 @@ func TestSerializeIllegalTags(t *testing.T) {
 	const name = "prefix"
 	const expected = name + ".__foo=b_a_r.__q=p"
 	tags := map[string]string{"foo": "b|a:r", "q": "p"}
-	serialized := serializeTags(name, tags)
+	serialized := SerializeTags(name, tags)
 	if serialized != expected {
 		t.Errorf("Serialized output (%s) didn't match expected output: %s",
 			serialized, expected)
@@ -267,7 +262,7 @@ func TestSerializeTagValuePeriod(t *testing.T) {
 	const name = "prefix"
 	const expected = name + ".__foo=blah_blah.__q=p"
 	tags := map[string]string{"foo": "blah.blah", "q": "p"}
-	serialized := serializeTags(name, tags)
+	serialized := SerializeTags(name, tags)
 	if serialized != expected {
 		t.Errorf("Serialized output (%s) didn't match expected output: %s",
 			serialized, expected)
@@ -278,7 +273,7 @@ func TestSerializeTagDiscardEmptyTagKeyValue(t *testing.T) {
 	const name = "prefix"
 	const expected = name + ".__key1=value1.__key3=value3"
 	tags := map[string]string{"key1": "value1", "key2": "", "key3": "value3", "": "value4"}
-	serialized := serializeTags(name, tags)
+	serialized := SerializeTags(name, tags)
 	if serialized != expected {
 		t.Errorf("Serialized output (%s) didn't match expected output: %s",
 			serialized, expected)
@@ -286,9 +281,9 @@ func TestSerializeTagDiscardEmptyTagKeyValue(t *testing.T) {
 }
 
 func TestTagSort(t *testing.T) {
-	contains := func(key string, tags tagSet) bool {
+	contains := func(key string, tags TagSet) bool {
 		for _, t := range tags {
-			if t.key == key {
+			if t.Key == key {
 				return true
 			}
 		}
@@ -299,13 +294,13 @@ func TestTagSort(t *testing.T) {
 		tags := randomTagSet(t, "v", n)
 		keys := make([]string, 0, len(tags)+5)
 		for _, t := range tags {
-			keys = append(keys, t.key)
+			keys = append(keys, t.Key)
 		}
 		for i := 0; i < 5; i++ {
 			for {
-				s := RandomString(t, 10)
+				s := randomString(t, 10)
 				if !contains(s, tags) {
-					keys = append(keys, RandomString(t, 10))
+					keys = append(keys, randomString(t, 10))
 					break
 				}
 			}
@@ -313,7 +308,7 @@ func TestTagSort(t *testing.T) {
 		for _, key := range keys {
 			i := tags.Search(key)
 			j := sort.Search(len(tags), func(i int) bool {
-				return tags[i].key >= key
+				return tags[i].Key >= key
 			})
 			if i != j {
 				t.Errorf("%d: Search got: %d want: %d", n, i, j)
@@ -329,20 +324,20 @@ func TestTagSort(t *testing.T) {
 		}
 
 		for i := range tags {
-			j := tags.Search(tags[i].key)
+			j := tags.Search(tags[i].Key)
 			if j != i {
-				t.Errorf("%d: search did not find %q-%d: %d", n, tags[i].key, i, j)
+				t.Errorf("%d: search did not find %q-%d: %d", n, tags[i].Key, i, j)
 			}
 		}
 	}
 }
 
-func randomTagSet(t testing.TB, valPrefix string, size int) tagSet {
-	s := make(tagSet, size)
+func randomTagSet(t testing.TB, valPrefix string, size int) TagSet {
+	s := make(TagSet, size)
 	for i := 0; i < len(s); i++ {
-		s[i] = tagPair{
-			key:   RandomString(t, 32),
-			value: fmt.Sprintf("%s%d", valPrefix, i),
+		s[i] = Tag{
+			Key:   randomString(t, 32),
+			Value: fmt.Sprintf("%s%d", valPrefix, i),
 		}
 	}
 	s.Sort()
@@ -361,17 +356,55 @@ func TestTagInsert(t *testing.T) {
 			t.Fatalf("%d: inserting tag failed: %+v", i, t2[i])
 		}
 	}
+
+	// Make sure Insert is COW
+
+	// If the tag we're inserting is already in the set we
+	// should *not* return a copy
+	t.Run("NoCopy", func(t *testing.T) {
+		t1 := TagSet{{"k", "v"}}
+		t2 := t1.Insert(Tag{"k", "v"})
+		if &t1[0] != &t2[0] {
+			t.Errorf("Copy: %p -- %p",
+				(*uintptr)(unsafe.Pointer(&t1[0])),
+				(*uintptr)(unsafe.Pointer(&t2[0])),
+			)
+		}
+	})
+
+	t.Run("CopyEqualKey", func(t *testing.T) {
+		t1 := TagSet{{"k", "v1"}}
+		t2 := t1.Insert(Tag{"k", "v2"})
+		if &t1[0] == &t2[0] {
+			t.Errorf("Copy: %p -- %p",
+				(*uintptr)(unsafe.Pointer(&t1[0])),
+				(*uintptr)(unsafe.Pointer(&t2[0])),
+			)
+		}
+	})
+
+	t.Run("Copy", func(t *testing.T) {
+		t1 := make(TagSet, 0, 2)
+		t1 = append(t1, Tag{"k1", "v1"})
+		t2 := t1.Insert(Tag{"k2", "v2"})
+		if &t1[0] == &t2[0] {
+			t.Errorf("TagSet was modified, but not copied: %p -- %p",
+				(*uintptr)(unsafe.Pointer(&t1[0])),
+				(*uintptr)(unsafe.Pointer(&t2[0])),
+			)
+		}
+	})
 }
 
-func mergeTagSetsReference(s1, s2 tagSet) tagSet {
+func mergeTagSetsReference(s1, s2 TagSet) TagSet {
 	seen := make(map[string]bool)
-	var a tagSet
+	var a TagSet
 	for _, t := range s2 {
 		a = append(a, t)
-		seen[t.key] = true
+		seen[t.Key] = true
 	}
 	for _, t := range s1 {
-		if !seen[t.key] {
+		if !seen[t.Key] {
 			a = append(a, t)
 		}
 	}
@@ -379,13 +412,13 @@ func mergeTagSetsReference(s1, s2 tagSet) tagSet {
 	return a
 }
 
-func makeScratch(s1, s2 tagSet) (tagSet, tagSet) {
-	a := make(tagSet, len(s1)+len(s2))
+func makeScratch(s1, s2 TagSet) (TagSet, TagSet) {
+	a := make(TagSet, len(s1)+len(s2))
 	copy(a[len(s1):], s2)
 	return a, a[len(s1):]
 }
 
-func tagSetEqual(s1, s2 tagSet) bool {
+func tagSetEqual(s1, s2 TagSet) bool {
 	if len(s1) != len(s2) {
 		return false
 	}
@@ -429,6 +462,57 @@ func TestMergeTagSets(t *testing.T) {
 	}
 }
 
+func TestSerializeTagSet(t *testing.T) {
+	if s := TagSet(nil).Serialize("name"); s != "name" {
+		t.Errorf("got: %q want: %q", s, "name")
+	}
+
+	const exp = "name.__k1=v1.__k2=v2"
+	set := NewTagSet(map[string]string{
+		"k1": "v1",
+		"k2": "v2",
+	})
+	if s := set.Serialize("name"); s != exp {
+		t.Errorf("got: %q want: %q", s, "name")
+	}
+}
+
+func TestNewTag(t *testing.T) {
+	exp := Tag{
+		Key:   "key",
+		Value: ReplaceChars("value.a:b|c"),
+	}
+	got := NewTag("key", "value.a:b|c")
+	if got != exp {
+		t.Errorf("NewTag: got: %+v want: %+v", got, exp)
+	}
+}
+
+func TestNewTagSet(t *testing.T) {
+	m := map[string]string{
+		"x":     "x",
+		"y":     "y",
+		"z":     "z",
+		"c":     "c|",
+		"b":     "b:",
+		"a":     "a.",
+		"":      "empty",
+		"empty": "",
+	}
+	exp := TagSet{
+		{"a", "a_"},
+		{"b", "b_"},
+		{"c", "c_"},
+		{"x", "x"},
+		{"y", "y"},
+		{"z", "z"},
+	}
+	got := NewTagSet(m)
+	if !reflect.DeepEqual(got, exp) {
+		t.Errorf("NewTagSet: got: %+v want: %+v", got, exp)
+	}
+}
+
 func benchmarkSerializeTags(b *testing.B, n int) {
 	const name = "prefix"
 	tags := make(map[string]string, n)
@@ -439,7 +523,7 @@ func benchmarkSerializeTags(b *testing.B, n int) {
 	}
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		serializeTags(name, tags)
+		SerializeTags(name, tags)
 	}
 }
 
@@ -453,19 +537,19 @@ func BenchmarkSerializeTags(b *testing.B) {
 
 func benchmarkSerializeTagSet(b *testing.B, n int) {
 	const name = "prefix"
-	tags := make(tagSet, 0, n)
+	tags := make(TagSet, 0, n)
 	for i := 0; i < n; i++ {
 		k := fmt.Sprintf("key%d", i)
 		v := fmt.Sprintf("val%d", i)
-		tags = append(tags, tagPair{
-			key:   k,
-			value: v,
+		tags = append(tags, Tag{
+			Key:   k,
+			Value: v,
 		})
 	}
 	tags.Sort()
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		serializeTagSet(name, tags)
+		tags.Serialize(name)
 	}
 }
 
@@ -480,16 +564,16 @@ func BenchmarkSerializeTagSet(b *testing.B) {
 // TODO (CEV): consider removing this
 func BenchmarkTagSearch(b *testing.B) {
 	rr := rand.New(rand.NewSource(12345))
-	tags := make(tagSet, 5)
+	tags := make(TagSet, 5)
 	for i := range tags {
-		tags[i].key = strconv.FormatInt(rr.Int63(), 10)
-		tags[i].value = strconv.FormatInt(rr.Int63(), 10)
+		tags[i].Key = strconv.FormatInt(rr.Int63(), 10)
+		tags[i].Value = strconv.FormatInt(rr.Int63(), 10)
 	}
 	tags.Sort()
 
 	for i := 0; i < b.N; i++ {
 		for _, tag := range tags {
-			_ = tags.Search(tag.key)
+			_ = tags.Search(tag.Key)
 		}
 	}
 }
@@ -497,17 +581,17 @@ func BenchmarkTagSearch(b *testing.B) {
 // TODO (CEV): consider removing this
 func BenchmarkTagSearch_Reference(b *testing.B) {
 	rr := rand.New(rand.NewSource(12345))
-	tags := make(tagSet, 5)
+	tags := make(TagSet, 5)
 	for i := range tags {
-		tags[i].key = strconv.FormatInt(rr.Int63(), 10)
-		tags[i].value = strconv.FormatInt(rr.Int63(), 10)
+		tags[i].Key = strconv.FormatInt(rr.Int63(), 10)
+		tags[i].Value = strconv.FormatInt(rr.Int63(), 10)
 	}
 	tags.Sort()
 
 	for i := 0; i < b.N; i++ {
 		for _, tag := range tags {
 			_ = sort.Search(len(tags), func(i int) bool {
-				return tags[i].key >= tag.key
+				return tags[i].Key >= tag.Key
 			})
 		}
 	}
@@ -520,15 +604,15 @@ func benchTagSort(b *testing.B, size int) {
 
 	// use a fixed source so that results are comparable
 	rr := rand.New(rand.NewSource(12345))
-	orig := make(tagSet, size)
+	orig := make(TagSet, size)
 	for i := range orig {
-		orig[i].key = strconv.FormatInt(rr.Int63(), 10)
-		orig[i].value = strconv.FormatInt(rr.Int63(), 10)
+		orig[i].Key = strconv.FormatInt(rr.Int63(), 10)
+		orig[i].Value = strconv.FormatInt(rr.Int63(), 10)
 	}
 	rr.Shuffle(len(orig), func(i, j int) {
 		orig[i], orig[j] = orig[j], orig[i]
 	})
-	tags := make(tagSet, len(orig))
+	tags := make(TagSet, len(orig))
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
@@ -553,22 +637,22 @@ func BenchmarkMergeTagSets(b *testing.B) {
 	if testing.Short() {
 		b.Skip("short test")
 	}
-	t1 := make(tagSet, 10)
-	t2 := make(tagSet, 10)
+	t1 := make(TagSet, 10)
+	t2 := make(TagSet, 10)
 	for i := 0; i < len(t1); i++ {
-		t1[i] = tagPair{
-			key:   fmt.Sprintf("k1%d", i),
-			value: fmt.Sprintf("v1_%d", i),
+		t1[i] = Tag{
+			Key:   fmt.Sprintf("k1%d", i),
+			Value: fmt.Sprintf("v1_%d", i),
 		}
-		t2[i] = tagPair{
-			key:   fmt.Sprintf("k2%d", i),
-			value: fmt.Sprintf("v2_%d", i),
+		t2[i] = Tag{
+			Key:   fmt.Sprintf("k2%d", i),
+			Value: fmt.Sprintf("v2_%d", i),
 		}
 	}
 	t1.Sort()
 	t2.Sort()
 
-	scratch := make(tagSet, len(t1)+len(t2))
+	scratch := make(TagSet, len(t1)+len(t2))
 
 	b.ResetTimer()
 	b.Run("KeysNotEqual", func(b *testing.B) {
@@ -586,7 +670,7 @@ func BenchmarkMergeTagSets(b *testing.B) {
 	b.Run("KeysHalfEqual", func(b *testing.B) {
 		for i := range t2 {
 			if i&1 != 0 {
-				t2[i].key = t1[i].key
+				t2[i].Key = t1[i].Key
 			}
 		}
 		t2.Sort()
@@ -603,7 +687,7 @@ func BenchmarkMergeTagSets(b *testing.B) {
 
 	b.Run("KeysEqual", func(b *testing.B) {
 		for i := range t2 {
-			t2[i].key = t1[i].key
+			t2[i].Key = t1[i].Key
 		}
 		for size := 2; size <= 10; size += 2 {
 			b.Run(fmt.Sprint(size), func(b *testing.B) {
@@ -621,13 +705,13 @@ func BenchmarkTagSetSearch_Reference(b *testing.B) {
 	var keys [5]string
 	tags := randomTagSet(b, "v_", len(keys))
 	for i := 0; i < len(tags); i++ {
-		keys[i] = tags[i].key
+		keys[i] = tags[i].Key
 	}
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		key := keys[i%len(keys)]
 		sort.Search(len(tags), func(i int) bool {
-			return tags[i].key >= key
+			return tags[i].Key >= key
 		})
 	}
 }
@@ -636,10 +720,331 @@ func BenchmarkTagSetSearch(b *testing.B) {
 	var keys [5]string
 	tags := randomTagSet(b, "v_", len(keys))
 	for i := 0; i < len(tags); i++ {
-		keys[i] = tags[i].key
+		keys[i] = tags[i].Key
 	}
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		tags.Search(keys[i%len(keys)])
+	}
+}
+
+///////////////////////////////////////////////////////////////////
+// TagSet Tests
+
+func mergeTagsReference(set TagSet, tags map[string]string) TagSet {
+	a := make(TagSet, 0, len(tags))
+	for k, v := range tags {
+		if k != "" && v != "" {
+			a = append(a, Tag{Key: k, Value: ReplaceChars(v)})
+		}
+	}
+	return mergeTagSetsReference(set, a)
+}
+
+func tagMapsEqual(m1, m2 map[string]string) bool {
+	if len(m1) != len(m2) {
+		return false
+	}
+	for k, v := range m1 {
+		if vv, ok := m2[k]; !ok || vv != v {
+			return false
+		}
+	}
+	return true
+}
+
+func testMergeTags(t *testing.T, s1, s2 TagSet, perInstanceTag bool) {
+	tags := make(map[string]string, len(s2))
+	origTags := make(map[string]string, len(s2))
+	for _, p := range s2 {
+		tags[p.Key] = p.Value
+		origTags[p.Key] = p.Value
+	}
+
+	set := s1
+	origPairs := append(TagSet(nil), set...)
+	expected := mergeTagsReference(set, tags)
+
+	var got TagSet
+	if perInstanceTag {
+		if !expected.Contains("_f") {
+			expected = expected.Insert(Tag{Key: "_f", Value: "i"})
+		}
+		got = set.MergePerInstanceTags(tags)
+	} else {
+		got = set.MergeTags(tags)
+	}
+	if !tagSetEqual(got, expected) {
+		t.Errorf("{s1=%d, s2=%d}: bad merge:\n# Got:\n%+v\n\n# Want:\n%+v\n",
+			len(s1), len(s2), got, expected)
+	}
+	if !tagSetEqual(set, origPairs) {
+		t.Fatalf("scope tags modified:\n# Got:\n%+v\n\n# Want:\n%+v\n",
+			set, origPairs)
+	}
+	if !tagMapsEqual(tags, origTags) {
+		t.Fatalf("tag map modified:\n# Got:\n%v\n\n# Want:\n%v\n",
+			set, origPairs)
+	}
+	if perInstanceTag {
+		if !got.Contains("_f") {
+			t.Fatal("missing per-instance tag")
+		}
+		exp := "i" // default
+		for _, p := range expected {
+			if p.Key == "_f" {
+				exp = ReplaceChars(p.Value)
+				break
+			}
+		}
+		tag := got[got.Search("_f")].Value
+		if tag != exp {
+			t.Fatalf("per-instance tag want: %q got: %q: %+v", exp, tag, got)
+		}
+	}
+}
+
+func TestMergePerInstanceTags(t *testing.T) {
+	t.Parallel()
+
+	rr := rand.New(rand.NewSource(time.Now().UnixNano()))
+
+	type testCase struct {
+		n1, n2            int
+		hasPerInstanceTag bool
+	}
+	tests := make([]testCase, 0, 2100)
+
+	// make sure we cover all 0..2 test cases
+	for i := 0; i <= 2; i++ {
+		for j := 0; j <= 2; j++ {
+			for k := 0; k < 2; k++ {
+				tests = append(tests, testCase{i, j, k == 1})
+			}
+		}
+	}
+	// add a whole bunch of random cases
+	for i := 0; i < 2000; i++ {
+		tests = append(tests, testCase{rr.Intn(8), rr.Intn(8), false})
+	}
+
+	for _, x := range tests {
+		s1 := randomTagSet(t, "v", x.n1)
+		s2 := randomTagSet(t, "v", x.n2)
+		if x.hasPerInstanceTag {
+			s1 = s1.Insert(Tag{Key: "_f", Value: "foo"})
+		}
+		if rr.Float64() < 0.1 {
+			s1 = s1.Insert(Tag{Key: "_f", Value: "foo"})
+		}
+		if rr.Float64() < 0.1 {
+			s2 = s2.Insert(Tag{Key: "_f", Value: "bar"})
+		}
+
+		// Add some invalid chars to s2
+		for i := range s2 {
+			if rr.Float64() < 0.2 {
+				s2[i].Value += "|"
+			}
+			if rr.Float64() < 0.1 {
+				s2[i].Value = ""
+			}
+			if rr.Float64() < 0.1 {
+				s2[i].Key = ""
+			}
+		}
+		testMergeTags(t, s1, s2, true)
+	}
+}
+
+func TestMergeTags(t *testing.T) {
+	t.Parallel()
+
+	rr := rand.New(rand.NewSource(time.Now().UnixNano()))
+
+	type testCase struct {
+		n1, n2 int
+	}
+	tests := make([]testCase, 0, 2100)
+
+	// make sure we cover all 0..2 test cases
+	for i := 0; i <= 2; i++ {
+		for j := 0; j <= 2; j++ {
+			tests = append(tests, testCase{i, j})
+		}
+	}
+	// add a whole bunch of random cases
+	for i := 0; i < 2000; i++ {
+		tests = append(tests, testCase{rr.Intn(64), rr.Intn(64)})
+	}
+
+	for _, x := range tests {
+		s1 := randomTagSet(t, "v", x.n1)
+		s2 := randomTagSet(t, "v", x.n2)
+
+		// Add some invalid chars to s2
+		for i := range s2 {
+			if rr.Float64() < 0.2 {
+				s2[i].Value += "|"
+			}
+			if rr.Float64() < 0.1 {
+				s2[i].Value = ""
+			}
+			if rr.Float64() < 0.1 {
+				s2[i].Key = ""
+			}
+		}
+		testMergeTags(t, s1, s2, false)
+	}
+}
+
+func TestMergeOneTagPanic(t *testing.T) {
+	tags := map[string]string{
+		"k1": "v1",
+		"k2": "v2",
+	}
+	defer func() {
+		if recover() == nil {
+			t.Fatal("expected panic got none")
+		}
+	}()
+	mergeOneTag(TagSet{}, tags)
+}
+
+func randomString(tb testing.TB, size int) string {
+	b := make([]byte, hex.DecodedLen(size))
+	if _, err := crand.Read(b); err != nil {
+		tb.Fatal(err)
+	}
+	return hex.EncodeToString(b)
+}
+
+// TODO: rename this once we rename the mergePairs method
+func benchScopeMergeTags(b *testing.B, baseSize, tagsSize int) {
+	set := make(TagSet, baseSize)
+	for i := range set {
+		set[i] = Tag{
+			Key:   fmt.Sprintf("key1_%d", i),
+			Value: fmt.Sprintf("val1_%d", i),
+		}
+	}
+	tags := make(map[string]string, tagsSize)
+	for i := 0; i < tagsSize; i++ {
+		key := fmt.Sprintf("key2_%d", i)
+		val := fmt.Sprintf("val2_%d", i)
+		tags[key] = val
+	}
+	b.ResetTimer()
+
+	for i := 0; i < b.N; i++ {
+		set.MergeTags(tags)
+	}
+}
+
+// TODO: rename this once we rename the mergePairs method
+func BenchmarkScopeMergeTags(b *testing.B) {
+	if testing.Short() {
+		b.Skip("short test")
+	}
+	for baseSize := 1; baseSize <= 8; baseSize++ {
+		for tagSize := 1; tagSize <= 8; tagSize++ {
+			b.Run(fmt.Sprintf("%d_%d", baseSize, tagSize), func(b *testing.B) {
+				benchScopeMergeTags(b, baseSize, tagSize)
+			})
+		}
+	}
+}
+
+///////////////////////////////////////////////////////////////////
+// Parse Tests
+
+var parseTagsTests = []struct {
+	Stat string
+	Name string
+	Tags map[string]string
+}{
+	{
+		Stat: "",
+		Name: "",
+	},
+	{
+		Stat: "prefix.name",
+		Name: "prefix.name",
+	},
+	{
+		Stat: "prefix.c.___f=i.__tag1=value1:12|c\n",
+		Name: "prefix.c",
+		Tags: map[string]string{
+			"_f":   "i",
+			"tag1": "value1",
+		},
+	},
+	// malformed
+	{
+		Stat: "invalid.__tag1=value1.__tag2",
+		Name: "invalid",
+		Tags: map[string]string{
+			"tag1": "value1",
+		},
+	},
+	{
+		Stat: "invalid.__tag1.__tag2=value2",
+		Name: "invalid",
+		Tags: map[string]string{
+			"tag2": "value2",
+		},
+	},
+	{
+		Stat: "invalid.__tag1=.__tag2=value2",
+		Name: "invalid",
+		Tags: map[string]string{
+			"tag1": "",
+			"tag2": "value2",
+		},
+	},
+}
+
+func TestRemoveStatValue(t *testing.T) {
+	tests := map[string]string{
+		"":                                     "",
+		"a":                                    "a",
+		"a:b:12|c\n":                           "a:b", // likely invalid, but handle it
+		"prefix.c.___f=i.__tag1=value1:12|c\n": "prefix.c.___f=i.__tag1=value1",
+		"prefix.c.___f=i.__tag1=value1":        "prefix.c.___f=i.__tag1=value1",
+	}
+	for in, exp := range tests {
+		got := removeStatValue(in)
+		if got != exp {
+			t.Errorf("%q: got: %q want: %q", in, got, exp)
+		}
+	}
+}
+
+func TestParseTags(t *testing.T) {
+	for _, x := range parseTagsTests {
+		s, m := ParseTags(x.Stat)
+		if s != x.Name {
+			t.Errorf("%+v: Name: got: %q want: %q", x, s, x.Name)
+		}
+		if !tagMapsEqual(m, x.Tags) {
+			t.Errorf("%+v: Tags: got: %q want: %q", x, m, x.Tags)
+		}
+	}
+}
+
+func TestParseTagSet(t *testing.T) {
+	for _, x := range parseTagsTests {
+		s, set := ParseTagSet(x.Stat)
+		if s != x.Name {
+			t.Errorf("%+v: Name: got: %q want: %q", x, s, x.Name)
+		}
+		exp := make(TagSet, 0, len(x.Tags))
+		for k, v := range x.Tags {
+			exp = append(exp, Tag{Key: k, Value: v})
+		}
+		exp.Sort()
+		if !tagSetEqual(set, exp) {
+			t.Errorf("%+v: Tags: got: %q want: %q", x, set, exp)
+		}
 	}
 }

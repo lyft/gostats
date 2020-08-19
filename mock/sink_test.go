@@ -1,4 +1,4 @@
-package mock
+package mock_test
 
 import (
 	"fmt"
@@ -8,6 +8,8 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
+
+	"github.com/lyft/gostats/mock"
 )
 
 type ErrorTest struct {
@@ -47,7 +49,7 @@ func (t *ErrorTest) Reset() testing.TB {
 }
 
 func TestSink(t *testing.T) {
-	testCounter := func(t *testing.T, exp uint64, sink *Sink) {
+	testCounter := func(t *testing.T, exp uint64, sink *mock.Sink) {
 		t.Helper()
 		const name = "test-counter"
 		sink.FlushCounter(name, exp)
@@ -83,7 +85,7 @@ func TestSink(t *testing.T) {
 		}, "gostats/mock: Counter (%q): expected Counter to not exist", name)
 	}
 
-	testGauge := func(t *testing.T, exp uint64, sink *Sink) {
+	testGauge := func(t *testing.T, exp uint64, sink *mock.Sink) {
 		const name = "test-gauge"
 		sink.FlushGauge(name, exp)
 		sink.AssertGaugeExists(t, name)
@@ -118,7 +120,7 @@ func TestSink(t *testing.T) {
 		}, "gostats/mock: Gauge (%q): expected Gauge to not exist", name)
 	}
 
-	testTimer := func(t *testing.T, exp float64, sink *Sink) {
+	testTimer := func(t *testing.T, exp float64, sink *mock.Sink) {
 		const name = "test-timer"
 		sink.FlushTimer(name, exp)
 		sink.AssertTimerExists(t, name)
@@ -156,16 +158,16 @@ func TestSink(t *testing.T) {
 	// test 0..1 - we want to make sure that 0 still registers a stat
 	for i := 0; i < 2; i++ {
 		t.Run("Counter", func(t *testing.T) {
-			testCounter(t, uint64(i), NewSink())
+			testCounter(t, uint64(i), mock.NewSink())
 		})
 		t.Run("Gauge", func(t *testing.T) {
-			testGauge(t, uint64(i), NewSink())
+			testGauge(t, uint64(i), mock.NewSink())
 		})
 		t.Run("Timer", func(t *testing.T) {
-			testTimer(t, float64(i), NewSink())
+			testTimer(t, float64(i), mock.NewSink())
 		})
 		// all together now
-		sink := NewSink()
+		sink := mock.NewSink()
 		testCounter(t, 1, sink)
 		testGauge(t, 1, sink)
 		testTimer(t, 1, sink)
@@ -177,7 +179,7 @@ func TestSinkMap_Values(t *testing.T) {
 	expGauges := make(map[string]uint64)
 	expTimers := make(map[string]float64)
 
-	sink := NewSink()
+	sink := mock.NewSink()
 	for i := 0; i < 2; i++ {
 		expCounters[fmt.Sprintf("counter-%d", i)] = uint64(i)
 		expGauges[fmt.Sprintf("gauge-%d", i)] = uint64(i)
@@ -216,13 +218,13 @@ func TestSinkMap_Values(t *testing.T) {
 
 // Test that the zero Sink is ready for use.
 func TestSinkLazyInit(t *testing.T) {
-	var s Sink
+	var s mock.Sink
 	s.FlushCounter("counter", 1)
 	s.AssertCounterEquals(t, "counter", 1)
 }
 
 func TestFlushTimer(t *testing.T) {
-	sink := NewSink()
+	sink := mock.NewSink()
 	var exp float64
 	for i := 0; i < 10000; i++ {
 		sink.FlushTimer("timer", 1)
@@ -243,7 +245,7 @@ func TestFlushTimer(t *testing.T) {
 
 func TestSink_ThreadSafe(t *testing.T) {
 	const N = 2000
-	sink := NewSink()
+	sink := mock.NewSink()
 	var (
 		counterCalls = new(int64)
 		gaugeCalls   = new(int64)
@@ -293,7 +295,7 @@ func TestSink_ThreadSafe(t *testing.T) {
 
 func TestSink_ThreadSafe_Reset(t *testing.T) {
 	const N = 2000
-	sink := NewSink()
+	sink := mock.NewSink()
 	funcs := [...]func(){
 		func() { sink.Flush() },
 		func() { sink.FlushCounter("name", 1) },
@@ -340,12 +342,12 @@ func TestSink_ThreadSafe_Reset(t *testing.T) {
 
 // TestFatalExample is an example usage of Fatal()
 func TestFatalExample(t *testing.T) {
-	sink := NewSink()
+	sink := mock.NewSink()
 	sink.FlushCounter("name", 1)
-	sink.AssertCounterEquals(Fatal(t), "name", 1)
+	sink.AssertCounterEquals(mock.Fatal(t), "name", 1)
 }
 
-func setupBenchmark(prefix string) (*Sink, [128]string) {
+func setupBenchmark(prefix string) (*mock.Sink, [128]string) {
 	var names [128]string
 	if prefix == "" {
 		prefix = "mock_sink"
@@ -353,7 +355,7 @@ func setupBenchmark(prefix string) (*Sink, [128]string) {
 	for i := 0; i < len(names); i++ {
 		names[i] = fmt.Sprintf("%s_%d", prefix, i)
 	}
-	sink := NewSink()
+	sink := mock.NewSink()
 	return sink, names
 }
 

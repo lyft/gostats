@@ -29,6 +29,6 @@ quick: # runs all tests without coverage or the race detector
 
 .PHONY: cover
 cover: # runs all tests against the package, generating a coverage report and opening it in the default browser
-	go test -race -covermode=atomic -coverprofile=cover.out ./...
+	go test -covermode=atomic -coverprofile=cover.out -coverpkg github.com/lyft/gostats/... ./...
 	go tool cover -html cover.out -o cover.html
 	which open && open cover.html
