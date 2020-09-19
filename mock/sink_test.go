@@ -69,7 +69,7 @@ func TestSink(t *testing.T) {
 			func(t testing.TB) { sink.AssertCounterCallCount(t, missing, 9999) },
 		}
 		for _, fn := range fns {
-			AssertErrorMsg(t, fn, "gostats/mock: Counter (%q): not found", missing)
+			AssertErrorMsg(t, fn, "gostats/mock: Counter (%q): not found in [test-counter]", missing)
 		}
 
 		AssertErrorMsg(t, func(t testing.TB) {
@@ -104,7 +104,7 @@ func TestSink(t *testing.T) {
 			func(t testing.TB) { sink.AssertGaugeCallCount(t, missing, 9999) },
 		}
 		for _, fn := range fns {
-			AssertErrorMsg(t, fn, "gostats/mock: Gauge (%q): not found", missing)
+			AssertErrorMsg(t, fn, "gostats/mock: Gauge (%q): not found in [test-gauge]", missing)
 		}
 
 		AssertErrorMsg(t, func(t testing.TB) {
@@ -139,7 +139,7 @@ func TestSink(t *testing.T) {
 			func(t testing.TB) { sink.AssertTimerCallCount(t, missing, 9999) },
 		}
 		for _, fn := range fns {
-			AssertErrorMsg(t, fn, "gostats/mock: Timer (%q): not found", missing)
+			AssertErrorMsg(t, fn, "gostats/mock: Timer (%q): not found in [test-timer]", missing)
 		}
 
 		AssertErrorMsg(t, func(t testing.TB) {
