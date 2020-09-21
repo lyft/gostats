@@ -134,6 +134,30 @@ func (s *Sink) LoadTimer(name string) (float64, bool) {
 	return 0, false
 }
 
+// ListCounters returns a list of existing counter names.
+func (s *Sink) ListCounters() []string {
+	return keys(s.counters())
+}
+
+// ListGauges returns a list of existing gauge names.
+func (s *Sink) ListGauges() []string {
+	return keys(s.gauges())
+}
+
+// ListTimers returns a list of existing timer names.
+func (s *Sink) ListTimers() []string {
+	return keys(s.timers())
+}
+
+// Note, this may return an incoherent snapshot if contents is being concurrently modified
+func keys(m *sync.Map) (a []string) {
+	m.Range(func(key interface{}, _ interface{}) bool {
+		a = append(a, key.(string))
+		return true
+	})
+	return a
+}
+
 // Counters returns all the counters currently stored by the sink.
 func (s *Sink) Counters() map[string]uint64 {
 	m := make(map[string]uint64)
@@ -224,7 +248,7 @@ func (s *Sink) AssertCounterEquals(tb testing.TB, name string, exp uint64) {
 	tb.Helper()
 	u, ok := s.LoadCounter(name)
 	if !ok {
-		tb.Errorf("gostats/mock: Counter (%q): not found", name)
+		tb.Errorf("gostats/mock: Counter (%q): not found in: %q", name, s.ListCounters())
 		return
 	}
 	if u != exp {
@@ -237,7 +261,7 @@ func (s *Sink) AssertGaugeEquals(tb testing.TB, name string, exp uint64) {
 	tb.Helper()
 	u, ok := s.LoadGauge(name)
 	if !ok {
-		tb.Errorf("gostats/mock: Gauge (%q): not found", name)
+		tb.Errorf("gostats/mock: Gauge (%q): not found in: %q", name, s.ListGauges())
 		return
 	}
 	if u != exp {
@@ -250,7 +274,7 @@ func (s *Sink) AssertTimerEquals(tb testing.TB, name string, exp float64) {
 	tb.Helper()
 	f, ok := s.LoadTimer(name)
 	if !ok {
-		tb.Errorf("gostats/mock: Timer (%q): not found", name)
+		tb.Errorf("gostats/mock: Timer (%q): not found in: %q", name, s.ListTimers())
 		return
 	}
 	if f != exp {
@@ -262,7 +286,7 @@ func (s *Sink) AssertTimerEquals(tb testing.TB, name string, exp float64) {
 func (s *Sink) AssertCounterExists(tb testing.TB, name string) {
 	tb.Helper()
 	if _, ok := s.LoadCounter(name); !ok {
-		tb.Errorf("gostats/mock: Counter (%q): not found", name)
+		tb.Errorf("gostats/mock: Counter (%q): not found in: %q", name, s.ListCounters())
 	}
 }
 
@@ -270,7 +294,7 @@ func (s *Sink) AssertCounterExists(tb testing.TB, name string) {
 func (s *Sink) AssertGaugeExists(tb testing.TB, name string) {
 	tb.Helper()
 	if _, ok := s.LoadGauge(name); !ok {
-		tb.Errorf("gostats/mock: Gauge (%q): not found", name)
+		tb.Errorf("gostats/mock: Gauge (%q): not found in: %q", name, s.ListGauges())
 	}
 }
 
@@ -278,7 +302,7 @@ func (s *Sink) AssertGaugeExists(tb testing.TB, name string) {
 func (s *Sink) AssertTimerExists(tb testing.TB, name string) {
 	tb.Helper()
 	if _, ok := s.LoadTimer(name); !ok {
-		tb.Errorf("gostats/mock: Timer (%q): not found", name)
+		tb.Errorf("gostats/mock: Timer (%q): not found in: %q", name, s.ListTimers())
 	}
 }
 
@@ -311,7 +335,7 @@ func (s *Sink) AssertCounterCallCount(tb testing.TB, name string, exp int) {
 	tb.Helper()
 	v, ok := s.counters().Load(name)
 	if !ok {
-		tb.Errorf("gostats/mock: Counter (%q): not found", name)
+		tb.Errorf("gostats/mock: Counter (%q): not found in: %q", name, s.ListCounters())
 		return
 	}
 	p := v.(*entry)
@@ -327,7 +351,7 @@ func (s *Sink) AssertGaugeCallCount(tb testing.TB, name string, exp int) {
 	tb.Helper()
 	v, ok := s.gauges().Load(name)
 	if !ok {
-		tb.Errorf("gostats/mock: Gauge (%q): not found", name)
+		tb.Errorf("gostats/mock: Gauge (%q): not found in: %q", name, s.ListGauges())
 		return
 	}
 	p := v.(*entry)
@@ -343,7 +367,7 @@ func (s *Sink) AssertTimerCallCount(tb testing.TB, name string, exp int) {
 	tb.Helper()
 	v, ok := s.timers().Load(name)
 	if !ok {
-		tb.Errorf("gostats/mock: Timer (%q): not found", name)
+		tb.Errorf("gostats/mock: Timer (%q): not found in: %q", name, s.ListTimers())
 		return
 	}
 	p := v.(*entry)
