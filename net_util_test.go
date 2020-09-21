@@ -347,7 +347,7 @@ func reconnectRetry(t testing.TB, fn func() error) {
 		// Retry if the error is due to the address being in use.
 		// On slow systems (CI) it can take awhile for the OS to
 		// realize the address is not in use.
-		if errors.Is(syscall.EADDRINUSE, err) {
+		if errors.Is(err, syscall.EADDRINUSE) {
 			time.Sleep(Retry)
 		} else {
 			t.Fatalf("unexpected error reconnecting: %s", err)
@@ -356,4 +356,80 @@ func reconnectRetry(t testing.TB, fn func() error) {
 	}
 	t.Fatalf("failed to reconnect after %d attempts and %s: %v",
 		N, Timeout, err)
+}
+
+func TestReconnectRetryTCP(t *testing.T) {
+	t.Parallel()
+
+	l1, err := net.ListenTCP("tcp", &net.TCPAddr{
+		IP:   net.IPv4(127, 0, 0, 1),
+		Port: 0,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer l1.Close()
+
+	l2, err := net.ListenTCP(l1.Addr().Network(), l1.Addr().(*net.TCPAddr))
+	if err == nil {
+		l2.Close()
+		t.Fatal("expected an error got nil")
+	}
+
+	if !errors.Is(err, syscall.EADDRINUSE) {
+		t.Fatalf("expected error to wrap %T got: %#v", syscall.EADDRINUSE, err)
+	}
+
+	first := true
+	callCount := 0
+	reconnectRetry(t, func() error {
+		callCount++
+		if first {
+			first = false
+			return err
+		}
+		return nil
+	})
+
+	if callCount != 2 {
+		t.Errorf("Expected call cound to be %d got: %d", 2, callCount)
+	}
+}
+
+func TestReconnectRetryUDP(t *testing.T) {
+	t.Parallel()
+
+	l1, err := net.ListenUDP("udp", &net.UDPAddr{
+		IP:   net.IPv4(127, 0, 0, 1),
+		Port: 0,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer l1.Close()
+
+	l2, err := net.ListenUDP(l1.LocalAddr().Network(), l1.LocalAddr().(*net.UDPAddr))
+	if err == nil {
+		l2.Close()
+		t.Fatal("expected an error got nil")
+	}
+
+	if !errors.Is(err, syscall.EADDRINUSE) {
+		t.Fatalf("expected error to wrap %T got: %#v", syscall.EADDRINUSE, err)
+	}
+
+	first := true
+	callCount := 0
+	reconnectRetry(t, func() error {
+		callCount++
+		if first {
+			first = false
+			return err
+		}
+		return nil
+	})
+
+	if callCount != 2 {
+		t.Errorf("Expected call cound to be %d got: %d", 2, callCount)
+	}
 }
