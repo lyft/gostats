@@ -3,6 +3,7 @@ package stats
 import (
 	"bufio"
 	"bytes"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -10,6 +11,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"syscall"
 	"testing"
 	"time"
 )
@@ -55,14 +57,17 @@ func (c *udpConn) Close() (err error) {
 }
 
 func (c *udpConn) Reconnect(t testing.TB, s *netTestSink) {
-	l, err := net.ListenUDP(c.addr.Network(), c.addr)
-	if err != nil {
-		t.Fatalf("restarting connection: %v", err)
-	}
-	c.ll = l
-	c.writeStat = s.writeStat
-	c.done = s.done
-	go c.Run(t)
+	reconnectRetry(t, func() error {
+		l, err := net.ListenUDP(c.addr.Network(), c.addr)
+		if err != nil {
+			return err
+		}
+		c.ll = l
+		c.writeStat = s.writeStat
+		c.done = s.done
+		go c.Run(t)
+		return nil
+	})
 }
 
 func (c *udpConn) Run(t testing.TB) {
@@ -120,14 +125,17 @@ func (c *tcpConn) Close() (err error) {
 }
 
 func (c *tcpConn) Reconnect(t testing.TB, s *netTestSink) {
-	l, err := net.ListenTCP(c.addr.Network(), c.addr)
-	if err != nil {
-		t.Fatalf("restarting connection: %v", err)
-	}
-	c.ll = l
-	c.writeStat = s.writeStat
-	c.done = s.done
-	go c.Run(t)
+	reconnectRetry(t, func() error {
+		l, err := net.ListenTCP(c.addr.Network(), c.addr)
+		if err != nil {
+			return err
+		}
+		c.ll = l
+		c.writeStat = s.writeStat
+		c.done = s.done
+		go c.Run(t)
+		return nil
+	})
 }
 
 func (c *tcpConn) Run(t testing.TB) {
@@ -322,4 +330,30 @@ func (s *netTestSink) CommandEnv(t testing.TB) []string {
 		fmt.Sprintf("STATSD_PROTOCOL=%s", s.Protocol()),
 		"GOSTATS_FLUSH_INTERVAL_SECONDS=1",
 	)
+}
+
+func reconnectRetry(t testing.TB, fn func() error) {
+	const (
+		Retry   = time.Second / 4
+		Timeout = 5 * time.Second
+		N       = int(Timeout / Retry)
+	)
+	var err error
+	for i := 0; i < N; i++ {
+		err = fn()
+		if err == nil {
+			return
+		}
+		// Retry if the error is due to the address being in use.
+		// On slow systems (CI) it can take awhile for the OS to
+		// realize the address is not in use.
+		if errors.Is(syscall.EADDRINUSE, err) {
+			time.Sleep(Retry)
+		} else {
+			t.Fatalf("unexpected error reconnecting: %s", err)
+			return // unreachable
+		}
+	}
+	t.Fatalf("failed to reconnect after %d attempts and %s: %v",
+		N, Timeout, err)
 }
