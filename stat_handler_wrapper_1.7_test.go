@@ -9,7 +9,7 @@ import (
 )
 
 func TestHTTPHandler_WrapResponse(t *testing.T) {
-	t.Parallel()
+	Parallel(t)
 
 	tests := []http.ResponseWriter{
 		struct {
@@ -57,7 +57,7 @@ func TestHTTPHandler_WrapResponse(t *testing.T) {
 	for i, test := range tests {
 		tc := test
 		t.Run(fmt.Sprint("test:", i), func(t *testing.T) {
-			t.Parallel()
+			Parallel(t)
 
 			_, canFlush := tc.(http.Flusher)
 			_, canHijack := tc.(http.Hijacker)

@@ -13,7 +13,7 @@ import (
 )
 
 func TestHttpHandler_ServeHTTP(t *testing.T) {
-	t.Parallel()
+	Parallel(t)
 
 	sink := mock.NewSink()
 	store := NewStore(sink, false)
