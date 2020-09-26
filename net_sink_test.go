@@ -666,12 +666,12 @@ func testNetSinkReconnect(t *testing.T, protocol string) {
 	// This test is flaky with UDP and the race detector, but good
 	// to have so we log instead of fail the test.
 	if protocol == "udp" {
-		stat := ts.WaitForStat(replaceFatalWithLog{t}, defaultRetryInterval*3)
+		stat := ts.WaitForStat(replaceFatalWithLog{t}, SocketReuseTimeout+defaultRetryInterval*3)
 		if stat != "" && stat != expected {
 			t.Fatalf("stats got: %q want: %q", stat, expected)
 		}
 	} else {
-		stat := ts.WaitForStat(t, defaultRetryInterval*3)
+		stat := ts.WaitForStat(t, SocketReuseTimeout+defaultRetryInterval*3)
 		if stat != expected {
 			t.Fatalf("stats got: %q want: %q", stat, expected)
 		}
