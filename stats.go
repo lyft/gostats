@@ -316,10 +316,7 @@ func (s *statStore) Flush() {
 	s.genMtx.RUnlock()
 
 	s.counters.Range(func(key, v interface{}) bool {
-		// Skip counters not incremented
-		if value := v.(*counter).latch(); value != 0 {
-			s.sink.FlushCounter(key.(string), value)
-		}
+		s.sink.FlushCounter(key.(string), v.(*counter).latch())
 		return true
 	})
 
