@@ -16,10 +16,6 @@ import (
 	"time"
 )
 
-const (
-	SocketReuseTimeout = 5 * time.Second
-)
-
 type TestConn interface {
 	Close() (err error)
 	Address() net.Addr
@@ -338,8 +334,9 @@ func (s *netTestSink) CommandEnv(t testing.TB) []string {
 
 func reconnectRetry(t testing.TB, fn func() error) {
 	const (
-		Retry = time.Second / 4
-		N     = int(SocketReuseTimeout / Retry)
+		Retry   = time.Second / 4
+		Timeout = 5 * time.Second
+		N       = int(Timeout / Retry)
 	)
 	var err error
 	for i := 0; i < N; i++ {
@@ -358,7 +355,7 @@ func reconnectRetry(t testing.TB, fn func() error) {
 		}
 	}
 	t.Fatalf("failed to reconnect after %d attempts and %s: %v",
-		N, SocketReuseTimeout, err)
+		N, Timeout, err)
 }
 
 func TestReconnectRetryTCP(t *testing.T) {
