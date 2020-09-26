@@ -276,7 +276,6 @@ func TestPerInstanceStats(t *testing.T) {
 		},
 	}
 
-
 	testPerInstanceMethods := func(t *testing.T, setupScope func(Scope) Scope) {
 		for _, x := range testCases {
 			sink := mock.NewSink()
