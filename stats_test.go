@@ -58,6 +58,20 @@ func TestTimer(t *testing.T) {
 	}
 }
 
+// Ensure 0 counters are flushed
+func TestZeroCounters(t *testing.T) {
+	sink := &testStatSink{}
+	store := NewStore(sink, true)
+	store.NewCounter("test")
+	store.Flush()
+
+	expected := "test:0|c\n"
+	counter := sink.record
+	if counter != expected {
+		t.Errorf("wanted %q got %q", expected, counter)
+	}
+}
+
 func randomString(tb testing.TB, size int) string {
 	b := make([]byte, hex.DecodedLen(size))
 	if _, err := crand.Read(b); err != nil {
