@@ -58,6 +58,20 @@ func TestTimer(t *testing.T) {
 	}
 }
 
+// Ensure 0 counters are flushed
+func TestZeroCounters(t *testing.T) {
+	sink := &testStatSink{}
+	store := NewStore(sink, true)
+	store.NewCounter("test")
+	store.Flush()
+
+	expected := "test:0|c\n"
+	counter := sink.record
+	if counter != expected {
+		t.Errorf("wanted %q got %q", expected, counter)
+	}
+}
+
 func randomString(tb testing.TB, size int) string {
 	b := make([]byte, hex.DecodedLen(size))
 	if _, err := crand.Read(b); err != nil {
@@ -276,14 +290,16 @@ func TestPerInstanceStats(t *testing.T) {
 		},
 	}
 
-	sink := mock.NewSink()
-
-	testPerInstanceMethods := func(t *testing.T, scope Scope) {
+	testPerInstanceMethods := func(t *testing.T, setupScope func(Scope) Scope) {
 		for _, x := range testCases {
-			sink.Reset()
+			sink := mock.NewSink()
+			scope := setupScope(&statStore{sink: sink})
 
 			scope.NewPerInstanceCounter("name", x.tags).Inc()
+			scope.NewPerInstanceGauge("name", x.tags).Inc()
+			scope.NewPerInstanceTimer("name", x.tags).AddValue(1)
 			scope.Store().Flush()
+
 			for key := range sink.Counters() {
 				if key != x.expected {
 					t.Errorf("Counter (%+v): got: %q want: %q", x, key, x.expected)
@@ -291,18 +307,14 @@ func TestPerInstanceStats(t *testing.T) {
 				break
 			}
 
-			scope.NewPerInstanceGauge("name", x.tags).Inc()
-			scope.Store().Flush()
-			for key := range sink.Counters() {
+			for key := range sink.Gauges() {
 				if key != x.expected {
 					t.Errorf("Gauge (%+v): got: %q want: %q", x, key, x.expected)
 				}
 				break
 			}
 
-			scope.NewPerInstanceTimer("name", x.tags).AddValue(1)
-			scope.Store().Flush()
-			for key := range sink.Counters() {
+			for key := range sink.Timers() {
 				if key != x.expected {
 					t.Errorf("Timer (%+v): got: %q want: %q", x, key, x.expected)
 				}
@@ -312,20 +324,18 @@ func TestPerInstanceStats(t *testing.T) {
 	}
 
 	t.Run("StatsStore", func(t *testing.T) {
-		store := &statStore{sink: sink}
-
-		testPerInstanceMethods(t, store)
+		testPerInstanceMethods(t, func(scope Scope) Scope { return scope })
 	})
 
 	t.Run("SubScope", func(t *testing.T) {
-		store := &subScope{registry: &statStore{sink: sink}, name: "x"}
-
 		// Add sub-scope prefix to the name
 		for i, x := range testCases {
 			testCases[i].expected = "x." + x.expected
 		}
 
-		testPerInstanceMethods(t, store)
+		testPerInstanceMethods(t, func(scope Scope) Scope {
+			return scope.Scope("x")
+		})
 	})
 }
 
