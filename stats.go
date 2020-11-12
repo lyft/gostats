@@ -5,6 +5,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+	"unsafe"
 
 	tagspkg "github.com/lyft/gostats/internal/tags"
 	logger "github.com/sirupsen/logrus"
@@ -113,6 +114,135 @@ type Counter interface {
 
 	// Value returns the current value of the Counter as a uint64.
 	Value() uint64
+}
+
+var _ Counter = (*lazyCounter)(nil)
+
+type xlazyCounter struct {
+	once    sync.Once
+	counter Counter
+	scope   Scope
+	name    string
+}
+
+func (c *xlazyCounter) init() {
+	c.counter = c.scope.NewCounter(c.name)
+	c.scope = nil
+	c.name = ""
+}
+
+type lazyCounter struct {
+	counter *counter
+	mu      sync.Mutex
+	store   *statStore
+	name    string
+}
+
+func (c *lazyCounter) initSlow() {
+	c.mu.Lock()
+	if c.counter == nil {
+		counter := c.store.NewCounter(c.name).(*counter)
+		atomic.StorePointer(
+			(*unsafe.Pointer)(unsafe.Pointer(&c.counter)),
+			unsafe.Pointer(counter),
+		)
+	}
+	c.mu.Unlock()
+}
+
+func (c *lazyCounter) lazyInit() {
+	if atomic.LoadPointer((*unsafe.Pointer)(unsafe.Pointer(&c.counter))) != nil {
+		return
+	}
+	c.initSlow()
+}
+
+func (c *lazyCounter) Add(value uint64) {
+	c.lazyInit()
+	c.counter.Add(value)
+}
+
+func (c *lazyCounter) Inc() {
+	c.lazyInit()
+	c.counter.Inc()
+}
+
+func (c *lazyCounter) Set(value uint64) {
+	c.lazyInit()
+	c.counter.Set(value)
+}
+
+func (c *lazyCounter) String() string {
+	c.lazyInit()
+	return c.counter.String()
+}
+
+func (c *lazyCounter) Value() uint64 {
+	c.lazyInit()
+	return c.counter.Value()
+}
+
+var _ Gauge = (*lazyGauge)(nil)
+
+type lazyGauge struct {
+	gauge *gauge
+	mu    sync.Mutex
+	store *statStore
+	name  string
+}
+
+func (g *lazyGauge) initSlow() {
+	g.mu.Lock()
+	if g.gauge == nil {
+		gauge := g.store.NewCounter(g.name).(*gauge)
+		atomic.StorePointer(
+			(*unsafe.Pointer)(unsafe.Pointer(&g.gauge)),
+			unsafe.Pointer(gauge),
+		)
+	}
+	g.mu.Unlock()
+}
+
+func (g *lazyGauge) lazyInit() {
+	if atomic.LoadPointer((*unsafe.Pointer)(unsafe.Pointer(&g.gauge))) != nil {
+		return
+	}
+	g.initSlow()
+}
+
+func (g *lazyGauge) Add(value uint64) {
+	g.lazyInit()
+	g.gauge.Add(value)
+}
+
+func (g *lazyGauge) Sub(value uint64) {
+	g.lazyInit()
+	g.gauge.Sub(value)
+}
+
+func (g *lazyGauge) Inc() {
+	g.lazyInit()
+	g.gauge.Inc()
+}
+
+func (g *lazyGauge) Dec() {
+	g.lazyInit()
+	g.gauge.Dec()
+}
+
+func (g *lazyGauge) Set(value uint64) {
+	g.lazyInit()
+	g.gauge.Set(value)
+}
+
+func (g *lazyGauge) String() string {
+	g.lazyInit()
+	return g.gauge.String()
+}
+
+func (g *lazyGauge) Value() uint64 {
+	g.lazyInit()
+	return g.gauge.Value()
 }
 
 // A Gauge is a stat that can increment and decrement.
@@ -528,3 +658,48 @@ func (s *subScope) NewPerInstanceTimer(name string, tags map[string]string) Time
 func joinScopes(parent, child string) string {
 	return parent + "." + child
 }
+
+type LazyScope struct {
+	Scope
+}
+
+// func (s LazyScope) Scope(name string) Scope {
+// 	return s.scope.Scope(name)
+// }
+
+// func (s LazyScope) ScopeWithTags(name string, tags map[string]string) Scope {
+// 	return s.scope.ScopeWithTags(name, tags)
+// }
+
+// func (s LazyScope) Store() Store {
+// return s.scope.Store()
+// }
+
+func (s LazyScope) NewCounter(name string) Counter {
+	return &lazyCounter{store: s.Scope, name: name}
+}
+
+// func (s LazyScope) NewCounterWithTags(name string, tags map[string]string) Counter {
+
+// }
+// func (s LazyScope) NewPerInstanceCounter(name string, tags map[string]string) Counter {
+
+// }
+// func (s LazyScope) NewGauge(name string) Gauge {
+
+// }
+// func (s LazyScope) NewGaugeWithTags(name string, tags map[string]string) Gauge {
+
+// }
+// func (s LazyScope) NewPerInstanceGauge(name string, tags map[string]string) Gauge {
+
+// }
+// func (s LazyScope) NewTimer(name string) Timer {
+
+// }
+// func (s LazyScope) NewTimerWithTags(name string, tags map[string]string) Timer {
+
+// }
+// func (s LazyScope) NewPerInstanceTimer(name string, tags map[string]string) Timer {
+
+// }

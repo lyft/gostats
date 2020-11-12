@@ -453,3 +453,62 @@ func BenchmarkStoreNewPerInstanceCounter(b *testing.B) {
 		}
 	})
 }
+
+func TestLazyCounter(t *testing.T) {
+	sink := mock.NewSink()
+	counter := &lazyCounter{
+		store: &statStore{sink: sink},
+		name:  "counter",
+	}
+
+	n := 8
+	start := make(chan struct{})
+	ready := make(chan struct{})
+	wg := new(sync.WaitGroup)
+
+	for i := 0; i < n; i++ {
+		wg.Add(1)
+		go func() {
+			ready <- struct{}{}
+			<-start
+			for i := 0; i < 1000; i++ {
+				counter.Add(1)
+			}
+			wg.Done()
+		}()
+	}
+
+	for i := 0; i < n; i++ {
+		<-ready
+	}
+	close(start)
+	wg.Wait()
+
+	counter.store.Flush()
+	sink.AssertCounterEquals(t, "counter", uint64(n*1000))
+}
+
+func BenchmarkParallelLazyCounter(b *testing.B) {
+	b.Run("Counter", func(b *testing.B) {
+		store := &statStore{sink: nullSink{}}
+		counter := store.NewCounter("counter")
+		b.ResetTimer()
+
+		for i := 0; i < b.N; i++ {
+			counter.Add(1)
+		}
+	})
+
+	b.Run("Lazy", func(b *testing.B) {
+		store := &statStore{sink: nullSink{}}
+		counter := &lazyCounter{
+			store: store,
+			name:  "counter",
+		}
+		b.ResetTimer()
+
+		for i := 0; i < b.N; i++ {
+			counter.Add(1)
+		}
+	})
+}
