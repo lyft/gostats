@@ -6,8 +6,10 @@ import (
 	"fmt"
 	"math"
 	"net"
+	"runtime"
 	"strconv"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	logger "github.com/sirupsen/logrus"
@@ -28,6 +30,9 @@ const (
 
 	approxMaxMemBytes = 1 << 22
 	chanSize          = approxMaxMemBytes / defaultBufferSizeTCP
+
+	STATE_UNLOCKED = 0
+	STATE_LOCKED   = 1
 )
 
 // An SinkOption configures a Sink.
@@ -122,10 +127,27 @@ func NewNetSink(opts ...SinkOption) FlushableSink {
 	return s
 }
 
+type spinLock uint32
+
+func (spin *spinLock) Lock() {
+	for !atomic.CompareAndSwapUint32((*uint32)(spin), STATE_UNLOCKED, STATE_LOCKED) {
+		runtime.Gosched()
+	}
+}
+
+func (spin *spinLock) FailableLock() bool {
+	return atomic.CompareAndSwapUint32((*uint32)(spin), STATE_UNLOCKED, STATE_LOCKED)
+}
+
+func (spin *spinLock) Unlock() {
+	atomic.StoreUint32((*uint32)(spin), STATE_UNLOCKED)
+}
+
 type netSink struct {
 	conn         net.Conn
 	outc         chan *bytes.Buffer
 	mu           sync.Mutex
+	lock         spinLock
 	bufWriter    *bufio.Writer
 	doFlush      chan chan struct{}
 	droppedBytes uint64
@@ -159,12 +181,12 @@ func (s *netSink) Flush() {
 }
 
 func (s *netSink) flush() error {
-	s.mu.Lock()
+	s.lock.Lock()
+	defer s.lock.Unlock()
 	err := s.bufWriter.Flush()
 	if err != nil {
 		s.handleFlushError(err)
 	}
-	s.mu.Unlock()
 	return err
 }
 
@@ -204,18 +226,19 @@ func (s *netSink) handleFlushError(err error) {
 }
 
 func (s *netSink) writeBuffer(b *buffer) {
-	s.mu.Lock()
-	if s.bufWriter.Available() < b.Len() {
-		if err := s.bufWriter.Flush(); err != nil {
+	if s.lock.FailableLock() {
+		defer s.lock.Unlock()
+		if s.bufWriter.Available() < b.Len() {
+			if err := s.bufWriter.Flush(); err != nil {
+				s.handleFlushError(err)
+			}
+			// If there is an error we reset the bufWriter so its
+			// okay to attempt the write after the failed flush.
+		}
+		if _, err := s.bufWriter.Write(*b); err != nil {
 			s.handleFlushError(err)
 		}
-		// If there is an error we reset the bufWriter so its
-		// okay to attempt the write after the failed flush.
 	}
-	if _, err := s.bufWriter.Write(*b); err != nil {
-		s.handleFlushError(err)
-	}
-	s.mu.Unlock()
 }
 
 func (s *netSink) flushUint64(name, suffix string, u uint64) {
@@ -329,9 +352,9 @@ func (s *netSink) writeToConn(buf *bytes.Buffer) {
 	s.conn.SetWriteDeadline(time.Time{}) // clear
 
 	if err != nil {
-		s.mu.Lock()
+		s.lock.Lock()
 		s.handleFlushErrorSize(err, len)
-		s.mu.Unlock()
+		s.lock.Unlock()
 		_ = s.conn.Close()
 		s.conn = nil // this will break the loop
 	}
