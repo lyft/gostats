@@ -130,8 +130,16 @@ func NewNetSink(opts ...SinkOption) FlushableSink {
 type spinLock uint32
 
 func (spin *spinLock) Lock() {
+	ct := 0
 	for !atomic.CompareAndSwapUint32((*uint32)(spin), STATE_UNLOCKED, STATE_LOCKED) {
-		runtime.Gosched()
+		ct++
+		if ct % 100 == 0 {
+			// failing to acquire lock, sleep instead of just spinning
+			time.Sleep(time.Millisecond * 10)
+		} else {
+			// yield to the scheduler most of the time
+			runtime.Gosched()
+		}
 	}
 }
 
