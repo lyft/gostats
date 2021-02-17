@@ -31,8 +31,9 @@ const (
 	approxMaxMemBytes = 1 << 22
 	chanSize          = approxMaxMemBytes / defaultBufferSizeTCP
 
-	STATE_UNLOCKED = 0
-	STATE_LOCKED   = 1
+	stateUnlocked = 0 // value of lock atomic when the lock is free
+	stateLocked   = 1 // value of lock atomic when the lock is taken
+
 )
 
 // An SinkOption configures a Sink.
@@ -131,9 +132,9 @@ type spinLock uint32
 
 func (spin *spinLock) Lock() {
 	ct := 0
-	for !atomic.CompareAndSwapUint32((*uint32)(spin), STATE_UNLOCKED, STATE_LOCKED) {
+	for !atomic.CompareAndSwapUint32((*uint32)(spin), stateUnlocked, stateLocked) {
 		ct++
-		if ct % 100 == 0 {
+		if ct%100 == 0 {
 			// failing to acquire lock, sleep instead of just spinning
 			time.Sleep(time.Millisecond * 10)
 		} else {
@@ -144,11 +145,11 @@ func (spin *spinLock) Lock() {
 }
 
 func (spin *spinLock) FailableLock() bool {
-	return atomic.CompareAndSwapUint32((*uint32)(spin), STATE_UNLOCKED, STATE_LOCKED)
+	return atomic.CompareAndSwapUint32((*uint32)(spin), stateUnlocked, stateLocked)
 }
 
 func (spin *spinLock) Unlock() {
-	atomic.StoreUint32((*uint32)(spin), STATE_UNLOCKED)
+	atomic.StoreUint32((*uint32)(spin), stateUnlocked)
 }
 
 type netSink struct {
