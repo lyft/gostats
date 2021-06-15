@@ -7,6 +7,7 @@ import (
 	"time"
 
 	tagspkg "github.com/lyft/gostats/internal/tags"
+	metrics "github.com/rcrowley/go-metrics"
 	logger "github.com/sirupsen/logrus"
 )
 
@@ -43,6 +44,7 @@ type Store interface {
 
 	// Add a StatGenerator to the Store that programatically generates stats.
 	AddStatGenerator(StatGenerator)
+
 	Scope
 }
 
@@ -302,8 +304,9 @@ type statStore struct {
 	gauges   sync.Map
 	timers   sync.Map
 
-	genMtx         sync.RWMutex
-	statGenerators []StatGenerator
+	genMtx            sync.RWMutex
+	statGenerators    []StatGenerator
+	goMetricsRegistry metrics.Registry
 
 	sink Sink
 }
@@ -339,6 +342,26 @@ func (s *statStore) AddStatGenerator(statGenerator StatGenerator) {
 	s.genMtx.Lock()
 	s.statGenerators = append(s.statGenerators, statGenerator)
 	s.genMtx.Unlock()
+}
+
+// GoMetricsRegistry returns a metrics.Registry that can be used by libraries which emit go-metrics stats.
+//
+// The metrics will be translated and flushed along with all other metrics. To scope the metrics, use
+// metrics.NewPrefixedChildRegistry(store.GoMetricsRegistry(), "scope-name").
+func (s *statStore) GoMetricsRegistry() metrics.Registry {
+	s.genMtx.RLock()
+	if s.goMetricsRegistry != nil {
+		return s.goMetricsRegistry
+	}
+	s.genMtx.RUnlock()
+
+	s.genMtx.Lock()
+	defer s.genMtx.Unlock()
+	if s.goMetricsRegistry == nil {
+		s.goMetricsRegistry = metrics.NewRegistry()
+		s.statGenerators = append(s.statGenerators, &goMetricsGenerator{r: s.goMetricsRegistry, s: s})
+	}
+	return s.goMetricsRegistry
 }
 
 func (s *statStore) run(ticker *time.Ticker) {
