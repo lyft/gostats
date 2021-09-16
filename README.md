@@ -1,4 +1,4 @@
-# Gostats [![GoDoc](https://godoc.org/github.com/lyft/gostats?status.svg)](https://godoc.org/github.com/lyft/gostats) [![Build Status](https://travis-ci.org/lyft/gostats.svg)](https://travis-ci.org/lyft/gostats)
+# Gostats [![GoDoc](https://godoc.org/github.com/lyft/gostats?status.svg)](https://godoc.org/github.com/lyft/gostats) [![Build Status](https://github.com/lyft/gostats/workflows/Build/badge.svg)](https://github.com/lyft/gostats/actions?query=branch:master+workflow:Build)
 
 `gostats` is a Go metrics library with support for Counters, Gauges, and Timers.
 
@@ -11,8 +11,7 @@ go get github.com/lyft/gostats
 ## Building & Testing
 
 ```sh
-make install
-make test
+go test ./...
 ```
 
 ## Usage

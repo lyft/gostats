@@ -1,6 +1,31 @@
+name: Build
 on: [push, pull_request]
 jobs:
-  update-ci:
+  run-tests:
+    strategy:
+      matrix:
+        go-version:
+          - 1.16.x
+          - 1.17.x
+
+    name: run-tests
     runs-on: ubuntu-latest
     steps:
-      - run: echo "CI is no longer running on this repo, update the files in .github/workflows to re-enable it. See the .travis.yml file for your previous CI config"; exit 1
+      - uses: actions/setup-go@v2.1.4
+        id: go
+        with:
+          stable: false
+          go-version: ${{ matrix.go_version }}
+
+      - uses: actions/checkout@v2.3.4
+
+      - name: run tests
+        run: go test -vet all -race ./...
+
+  lint:
+    name: lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v2.3.4
+
+      - uses: golangci/golangci-lint-action@v2.5.2
