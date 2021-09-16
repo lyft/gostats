@@ -642,7 +642,7 @@ func testNetSinkReconnect(t *testing.T, protocol string) {
 	if testing.Short() {
 		t.Skip("Skipping: short test")
 	}
-	Parallel(t)
+	t.Parallel()
 
 	const expected = "counter:1|c\n"
 
@@ -692,7 +692,7 @@ func testNetSinkReconnectFailure(t *testing.T, protocol string) {
 	if testing.Short() {
 		t.Skip("Skipping: short test")
 	}
-	Parallel(t)
+	t.Parallel()
 
 	ts, sink := setupTestNetSink(t, protocol, true)
 	defer ts.Close()
@@ -794,7 +794,7 @@ func buildBinary(t testing.TB, path string) (string, func()) {
 }
 
 func testNetSinkIntegration(t *testing.T, protocol string) {
-	Parallel(t)
+	t.Parallel()
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
