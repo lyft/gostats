@@ -27,7 +27,6 @@ const (
 	defaultBufferSizeUDP = 1432
 
 	approxMaxMemBytes = 1 << 22
-	chanSize          = approxMaxMemBytes / defaultBufferSizeTCP
 )
 
 // An SinkOption configures a Sink.
@@ -83,7 +82,7 @@ func NewTCPStatsdSink(opts ...SinkOption) FlushableSink {
 }
 
 // NewNetSink returns a FlushableSink that writes to a statsd sink over the
-// network. By default settings are taken from the enviornment, but can be
+// network. By default settings are taken from the environment, but can be
 // overridden via SinkOptions.
 func NewNetSink(opts ...SinkOption) FlushableSink {
 	s := &netSink{
@@ -320,7 +319,6 @@ func (s *netSink) run() {
 // writeToConn writes the buffer to the underlying conn.  May only be called
 // from run().
 func (s *netSink) writeToConn(buf *bytes.Buffer) {
-
 	len := buf.Len()
 
 	// TODO (CEV): parameterize timeout

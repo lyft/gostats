@@ -1,3 +1,4 @@
+//go:build go1.8
 // +build go1.8
 
 package stats
@@ -98,7 +99,6 @@ func TestHTTPHandler_WrapResponse(t *testing.T) {
 		_, canFlush := tc.(http.Flusher)
 		_, canHijack := tc.(http.Hijacker)
 		_, canPush := tc.(http.Pusher)
-		_, canNotify := tc.(http.CloseNotifier)
 
 		rw := h.wrapResponse(tc)
 
@@ -110,9 +110,6 @@ func TestHTTPHandler_WrapResponse(t *testing.T) {
 		}
 		if _, ok := rw.(http.Pusher); ok != canPush {
 			t.Errorf("Test(%d): Pusher: wanted %t", i, canPush)
-		}
-		if _, ok := rw.(http.CloseNotifier); ok != canNotify {
-			t.Errorf("Test(%d): CloseNotifier: wanted %t", i, canNotify)
 		}
 	}
 }

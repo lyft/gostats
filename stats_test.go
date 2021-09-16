@@ -207,7 +207,6 @@ func TestTagMapNotModified(t *testing.T) {
 				}
 			})
 		}
-
 	}
 }
 

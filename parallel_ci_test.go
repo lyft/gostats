@@ -1,3 +1,4 @@
+//go:build travis
 // +build travis
 
 package stats

@@ -246,7 +246,7 @@ func (c *gauge) Add(value uint64) {
 }
 
 func (c *gauge) Sub(value uint64) {
-	atomic.AddUint64(&c.value, ^uint64(value-1))
+	atomic.AddUint64(&c.value, ^(value - 1))
 }
 
 func (c *gauge) Inc() {
@@ -288,7 +288,7 @@ type timespan struct {
 }
 
 func (ts *timespan) Complete() time.Duration {
-	d := time.Now().Sub(ts.start)
+	d := time.Since(ts.start)
 	ts.timer.time(d)
 	return d
 }

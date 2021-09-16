@@ -583,7 +583,7 @@ func testNetSinkBufferSize(t *testing.T, protocol string) {
 }
 
 func testNetSinkStatTypes(t *testing.T, protocol string) {
-	var expected = [...]string{
+	expected := [...]string{
 		"counter:1|c\n",
 		"gauge:1|g\n",
 		"timer_int:1|ms\n",
@@ -772,7 +772,7 @@ func buildBinary(t testing.TB, path string) (string, func()) {
 		// foo/bar/main.go => bar
 		binaryName = filepath.Base(filepath.Dir(path))
 	} else {
-		filepath.Base(path)
+		binaryName = filepath.Base(path)
 	}
 
 	tmpdir, err := ioutil.TempDir("", "gostats-")
