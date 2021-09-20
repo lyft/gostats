@@ -9,7 +9,6 @@ import (
 const requestTimer = "rq_time_us"
 
 type httpHandler struct {
-	prefix   string
 	scope    Scope
 	delegate http.Handler
 
@@ -58,7 +57,6 @@ type responseWriter struct {
 	http.ResponseWriter
 
 	headerWritten bool
-	span          Timespan
 	handler       *httpHandler
 }
 

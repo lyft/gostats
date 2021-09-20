@@ -359,7 +359,7 @@ func reconnectRetry(t testing.TB, fn func() error) {
 }
 
 func TestReconnectRetryTCP(t *testing.T) {
-	Parallel(t)
+	t.Parallel()
 
 	l1, err := net.ListenTCP("tcp", &net.TCPAddr{
 		IP:   net.IPv4(127, 0, 0, 1),
@@ -397,7 +397,7 @@ func TestReconnectRetryTCP(t *testing.T) {
 }
 
 func TestReconnectRetryUDP(t *testing.T) {
-	Parallel(t)
+	t.Parallel()
 
 	l1, err := net.ListenUDP("udp", &net.UDPAddr{
 		IP:   net.IPv4(127, 0, 0, 1),

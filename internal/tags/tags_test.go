@@ -122,7 +122,6 @@ func TestSerializeTagsNetworkSort(t *testing.T) {
 }
 
 func TestSerializeTagsInvalidKeyValue(t *testing.T) {
-
 	// Baseline tests against a hardcoded expected value
 	t.Run("Baseline", func(t *testing.T) {
 		const expected = "name.__1=1"

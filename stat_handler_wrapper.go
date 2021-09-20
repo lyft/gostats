@@ -1,3 +1,4 @@
+//go:build go1.8
 // +build go1.8
 
 package stats
@@ -13,6 +14,8 @@ func (h *httpHandler) wrapResponse(w http.ResponseWriter) http.ResponseWriter {
 	flusher, canFlush := w.(http.Flusher)
 	hijacker, canHijack := w.(http.Hijacker)
 	pusher, canPush := w.(http.Pusher)
+
+	//nolint:staticcheck
 	closeNotifier, canNotify := w.(http.CloseNotifier)
 
 	if canFlush && canHijack && canPush && canNotify {

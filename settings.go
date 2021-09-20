@@ -39,7 +39,7 @@ type Settings struct {
 	LoggingSinkDisabled bool `envconfig:"GOSTATS_LOGGING_SINK_DISABLED" default:"false"`
 }
 
-// An envError is an error that occured parsing an environment variable
+// An envError is an error that occurred parsing an environment variable
 type envError struct {
 	Key   string
 	Value string

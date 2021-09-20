@@ -1,3 +1,4 @@
+//go:build !go1.8
 // +build !go1.8
 
 package stats
@@ -9,7 +10,7 @@ import (
 )
 
 func TestHTTPHandler_WrapResponse(t *testing.T) {
-	Parallel(t)
+	t.Parallel()
 
 	tests := []http.ResponseWriter{
 		struct {
@@ -57,7 +58,7 @@ func TestHTTPHandler_WrapResponse(t *testing.T) {
 	for i, test := range tests {
 		tc := test
 		t.Run(fmt.Sprint("test:", i), func(t *testing.T) {
-			Parallel(t)
+			t.Parallel()
 
 			_, canFlush := tc.(http.Flusher)
 			_, canHijack := tc.(http.Hijacker)
