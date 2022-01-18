@@ -47,5 +47,5 @@ func (s *prometheusSink) FlushTimer(name string, value float64) {
 		s.histograms[name] = promauto.NewHistogram(prometheus.HistogramOpts{Name: name})
 	}
 	histogram := s.histograms[name]
-	histogram.Observe(float64(value))
+	histogram.Observe(value)
 }

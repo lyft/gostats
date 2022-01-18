@@ -204,7 +204,7 @@ func NewDefaultStore() Store {
 
 func NewPrometheusStore() Store {
 	newStore := NewStore(NewPrometheusSink(), false)
-	go newStore.Start(time.NewTicker(time.Duration(1 * time.Second)))
+	go newStore.Start(time.NewTicker(1 * time.Second))
 	return newStore
 }
 
