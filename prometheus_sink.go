@@ -17,7 +17,7 @@ type prometheusSink struct {
 // NewLoggingSink returns a Sink that flushes stats to os.StdErr.
 func NewPrometheusSink() Sink {
 	http.Handle("/metrics", promhttp.Handler())
-	go http.ListenAndServe(":2112", nil)
+	go http.ListenAndServe(":9090", nil)
 	newSink := &prometheusSink{
 		counters:   make(map[string]prometheus.Counter),
 		gauges:     make(map[string]prometheus.Gauge),
