@@ -74,7 +74,7 @@ func (s *Sink) FlushGauge(name string, val uint64) {
 		v, _ = gauges.LoadOrStore(name, new(entry))
 	}
 	p := v.(*entry)
-	atomic.AddUint64(&p.val, val)
+	atomic.StoreUint64(&p.val, val)
 	atomic.AddInt64(&p.count, 1)
 }
 

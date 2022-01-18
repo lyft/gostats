@@ -251,7 +251,6 @@ func TestSink_ThreadSafe(t *testing.T) {
 		gaugeCalls   = new(int64)
 		timerCalls   = new(int64)
 		counterVal   = new(uint64)
-		gaugeVal     = new(uint64)
 	)
 	funcs := [...]func(){
 		func() {
@@ -261,7 +260,6 @@ func TestSink_ThreadSafe(t *testing.T) {
 		},
 		func() {
 			atomic.AddInt64(gaugeCalls, 1)
-			atomic.AddUint64(gaugeVal, 1)
 			sink.FlushGauge("name", 1)
 		},
 		func() {
@@ -290,7 +288,7 @@ func TestSink_ThreadSafe(t *testing.T) {
 	sink.AssertTimerCallCount(t, "name", int(atomic.LoadInt64(timerCalls)))
 
 	sink.AssertCounterEquals(t, "name", atomic.LoadUint64(counterVal))
-	sink.AssertGaugeEquals(t, "name", atomic.LoadUint64(gaugeVal))
+	sink.AssertGaugeEquals(t, "name", uint64(1))
 }
 
 func TestSink_ThreadSafe_Reset(t *testing.T) {
