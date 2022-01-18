@@ -202,6 +202,12 @@ func NewDefaultStore() Store {
 	return newStore
 }
 
+func NewPrometheusStore() Store {
+	newStore := NewStore(NewPrometheusSink(), false)
+	go newStore.Start(time.NewTicker(time.Duration(1 * time.Second)))
+	return newStore
+}
+
 type counter struct {
 	currentValue  uint64
 	lastSentValue uint64
