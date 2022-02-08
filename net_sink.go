@@ -291,6 +291,20 @@ func (s *netSink) run() {
 			reconnectFailed = false
 		}
 
+		// Handle buffers that need to be retried first, if they exist.
+		select {
+		case buf := <-s.retryc:
+			if err := s.writeToConn(buf); err != nil {
+				s.mu.Lock()
+				s.handleFlushErrorSize(err, buf.Len())
+				s.mu.Unlock()
+			}
+			putBuffer(buf)
+			continue
+		default:
+			// Drop through in case retryc has nothing.
+		}
+
 		select {
 		case <-t.C:
 			s.flush()
@@ -315,13 +329,6 @@ func (s *netSink) run() {
 			if err := s.writeToConn(buf); err != nil {
 				s.retryc <- buf
 				continue
-			}
-			putBuffer(buf)
-		case buf := <-s.retryc:
-			if err := s.writeToConn(buf); err != nil {
-				s.mu.Lock()
-				s.handleFlushErrorSize(err, buf.Len())
-				s.mu.Unlock()
 			}
 			putBuffer(buf)
 		}
