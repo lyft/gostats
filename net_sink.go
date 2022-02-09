@@ -110,7 +110,7 @@ func NewNetSink(opts ...SinkOption) FlushableSink {
 	}
 
 	s.outc = make(chan *bytes.Buffer, approxMaxMemBytes/bufSize)
-	s.retryc = make(chan *bytes.Buffer, approxMaxMemBytes/bufSize)
+	s.retryc = make(chan *bytes.Buffer, 1) // It should be okay to limit this given we preferentially process from this over outc.
 
 	writer := &sinkWriter{outc: s.outc}
 	s.bufWriter = bufio.NewWriterSize(writer, bufSize)
