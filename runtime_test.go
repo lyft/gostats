@@ -14,14 +14,13 @@ func TestRuntime(t *testing.T) {
 	g.GenerateStats()
 	store.Flush()
 
-	pattern :=
-		`runtime.lastGC:\d+|g\n` +
-			`runtime.pauseTotalNs:\d+|g\n` +
-			`runtime.numGC:\d+|g\n` +
-			`runtime.alloc:\d+|g\n` +
-			`runtime.totalAlloc:\d+|g\n` +
-			`runtime.frees:\d+|g\n` +
-			`runtime.nextGC:\d+|g\n`
+	pattern := `runtime.lastGC:\d+|g\n` +
+		`runtime.pauseTotalNs:\d+|g\n` +
+		`runtime.numGC:\d+|g\n` +
+		`runtime.alloc:\d+|g\n` +
+		`runtime.totalAlloc:\d+|g\n` +
+		`runtime.frees:\d+|g\n` +
+		`runtime.nextGC:\d+|g\n`
 
 	ok, err := regexp.Match(pattern, []byte(sink.record))
 	if err != nil {
