@@ -109,12 +109,10 @@ func NewNetSink(opts ...SinkOption) FlushableSink {
 		bufSize = defaultBufferSizeTCP
 	}
 
-	outc := make(chan *bytes.Buffer, approxMaxMemBytes/bufSize)
-	writer := &sinkWriter{
-		outc: outc,
-	}
-	s.outc = outc
+	s.outc = make(chan *bytes.Buffer, approxMaxMemBytes/bufSize)
+	s.retryc = make(chan *bytes.Buffer, 1) // It should be okay to limit this given we preferentially process from this over outc.
 
+	writer := &sinkWriter{outc: s.outc}
 	s.bufWriter = bufio.NewWriterSize(writer, bufSize)
 
 	go s.run()
@@ -124,6 +122,7 @@ func NewNetSink(opts ...SinkOption) FlushableSink {
 type netSink struct {
 	conn         net.Conn
 	outc         chan *bytes.Buffer
+	retryc       chan *bytes.Buffer
 	mu           sync.Mutex
 	bufWriter    *bufio.Writer
 	doFlush      chan chan struct{}
@@ -292,6 +291,20 @@ func (s *netSink) run() {
 			reconnectFailed = false
 		}
 
+		// Handle buffers that need to be retried first, if they exist.
+		select {
+		case buf := <-s.retryc:
+			if err := s.writeToConn(buf); err != nil {
+				s.mu.Lock()
+				s.handleFlushErrorSize(err, buf.Len())
+				s.mu.Unlock()
+			}
+			putBuffer(buf)
+			continue
+		default:
+			// Drop through in case retryc has nothing.
+		}
+
 		select {
 		case <-t.C:
 			s.flush()
@@ -305,12 +318,18 @@ func (s *netSink) run() {
 			n := len(s.outc)
 			for i := 0; i < n && s.conn != nil; i++ {
 				buf := <-s.outc
-				s.writeToConn(buf)
+				if err := s.writeToConn(buf); err != nil {
+					s.retryc <- buf
+					continue
+				}
 				putBuffer(buf)
 			}
 			close(done)
 		case buf := <-s.outc:
-			s.writeToConn(buf)
+			if err := s.writeToConn(buf); err != nil {
+				s.retryc <- buf
+				continue
+			}
 			putBuffer(buf)
 		}
 	}
@@ -318,21 +337,17 @@ func (s *netSink) run() {
 
 // writeToConn writes the buffer to the underlying conn.  May only be called
 // from run().
-func (s *netSink) writeToConn(buf *bytes.Buffer) {
-	len := buf.Len()
-
+func (s *netSink) writeToConn(buf *bytes.Buffer) error {
 	// TODO (CEV): parameterize timeout
 	s.conn.SetWriteDeadline(time.Now().Add(defaultWriteTimeout))
 	_, err := buf.WriteTo(s.conn)
 	s.conn.SetWriteDeadline(time.Time{}) // clear
 
 	if err != nil {
-		s.mu.Lock()
-		s.handleFlushErrorSize(err, len)
-		s.mu.Unlock()
 		_ = s.conn.Close()
 		s.conn = nil // this will break the loop
 	}
+	return err
 }
 
 func (s *netSink) connect(address string) error {
