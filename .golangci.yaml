@@ -24,5 +24,3 @@ issues:
   max-same-issues: 0
 run:
   deadline: 5m
-  build-tags:
-    - integration
