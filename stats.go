@@ -86,14 +86,23 @@ type Scope interface {
 	// NewPerInstanceGauge adds a Per instance Gauge with optional Tags to a store, or a scope.
 	NewPerInstanceGauge(name string, tags map[string]string) Gauge
 
-	// NewTimer adds a Timer to a store, or a scope.
+	// NewTimer adds a Timer to a store, or a scope that uses microseconds as its unit.
 	NewTimer(name string) Timer
 
-	// NewTimerWithTags adds a Timer with Tags to a store, or a scope with Tags.
+	// NewTimerWithTags adds a Timer with Tags to a store, or a scope with Tags that uses microseconds as its unit.
 	NewTimerWithTags(name string, tags map[string]string) Timer
 
-	// NewPerInstanceTimer adds a Per instance Timer with optional Tags to a store, or a scope.
+	// NewPerInstanceTimer adds a Per instance Timer with optional Tags to a store, or a scope that uses microseconds as its unit.
 	NewPerInstanceTimer(name string, tags map[string]string) Timer
+
+	// NewMilliTimer adds a Timer to a store, or a scope that uses milliseconds as its unit.
+	NewMilliTimer(name string) Timer
+
+	// NewMilliTimerWithTags adds a Timer with Tags to a store, or a scope with Tags that uses milliseconds as its unit.
+	NewMilliTimerWithTags(name string, tags map[string]string) Timer
+
+	// NewPerInstanceMilliTimer adds a Per instance Timer with optional Tags to a store, or a scope that uses milliseconds as its unit.
+	NewPerInstanceMilliTimer(name string, tags map[string]string) Timer
 }
 
 // A Counter is an always incrementing stat.
@@ -143,6 +152,9 @@ type Gauge interface {
 type Timer interface {
 	// AddValue flushs the timer with the argument's value.
 	AddValue(float64)
+
+	// AddDuration emits the duration as a timing measurement.
+	AddDuration(time.Duration)
 
 	// AllocateSpan allocates a Timespan.
 	AllocateSpan() Timespan
@@ -266,12 +278,17 @@ func (c *gauge) Value() uint64 {
 }
 
 type timer struct {
+	base time.Duration
 	name string
 	sink Sink
 }
 
 func (t *timer) time(dur time.Duration) {
-	t.sink.FlushTimer(t.name, float64(dur/time.Microsecond))
+	t.AddDuration(dur)
+}
+
+func (t *timer) AddDuration(dur time.Duration) {
+	t.sink.FlushTimer(t.name, float64(dur/t.base))
 }
 
 func (t *timer) AddValue(value float64) {
@@ -427,27 +444,35 @@ func (s *statStore) NewPerInstanceGauge(name string, tags map[string]string) Gau
 	return s.newGaugeWithTagSet(name, tagspkg.TagSet(nil).MergePerInstanceTags(tags))
 }
 
-func (s *statStore) newTimer(serializedName string) *timer {
+func (s *statStore) newTimer(serializedName string, base time.Duration) *timer {
 	if v, ok := s.timers.Load(serializedName); ok {
 		return v.(*timer)
 	}
-	t := &timer{name: serializedName, sink: s.sink}
+	t := &timer{name: serializedName, sink: s.sink, base: base}
 	if v, loaded := s.timers.LoadOrStore(serializedName, t); loaded {
 		return v.(*timer)
 	}
 	return t
 }
 
+func (s *statStore) NewMilliTimer(name string) Timer {
+	return s.newTimer(name, time.Millisecond)
+}
+
+func (s *statStore) NewMilliTimerWithTags(name string, tags map[string]string) Timer {
+	return s.newTimer(tagspkg.SerializeTags(name, tags), time.Millisecond)
+}
+
 func (s *statStore) NewTimer(name string) Timer {
-	return s.newTimer(name)
+	return s.newTimer(name, time.Microsecond)
 }
 
 func (s *statStore) NewTimerWithTags(name string, tags map[string]string) Timer {
-	return s.newTimer(tagspkg.SerializeTags(name, tags))
+	return s.newTimer(tagspkg.SerializeTags(name, tags), time.Microsecond)
 }
 
-func (s *statStore) newTimerWithTagSet(name string, tags tagspkg.TagSet) Timer {
-	return s.newTimer(tags.Serialize(name))
+func (s *statStore) newTimerWithTagSet(name string, tags tagspkg.TagSet, base time.Duration) Timer {
+	return s.newTimer(tags.Serialize(name), base)
 }
 
 func (s *statStore) NewPerInstanceTimer(name string, tags map[string]string) Timer {
@@ -457,7 +482,17 @@ func (s *statStore) NewPerInstanceTimer(name string, tags map[string]string) Tim
 	if _, found := tags["_f"]; found {
 		return s.NewTimerWithTags(name, tags)
 	}
-	return s.newTimerWithTagSet(name, tagspkg.TagSet(nil).MergePerInstanceTags(tags))
+	return s.newTimerWithTagSet(name, tagspkg.TagSet(nil).MergePerInstanceTags(tags), time.Microsecond)
+}
+
+func (s *statStore) NewPerInstanceMilliTimer(name string, tags map[string]string) Timer {
+	if len(tags) == 0 {
+		return s.NewMilliTimerWithTags(name, emptyPerInstanceTags)
+	}
+	if _, found := tags["_f"]; found {
+		return s.NewMilliTimerWithTags(name, tags)
+	}
+	return s.newTimerWithTagSet(name, tagspkg.TagSet(nil).MergePerInstanceTags(tags), time.Millisecond)
 }
 
 type subScope struct {
@@ -517,12 +552,25 @@ func (s *subScope) NewTimer(name string) Timer {
 }
 
 func (s *subScope) NewTimerWithTags(name string, tags map[string]string) Timer {
-	return s.registry.newTimerWithTagSet(joinScopes(s.name, name), s.tags.MergeTags(tags))
+	return s.registry.newTimerWithTagSet(joinScopes(s.name, name), s.tags.MergeTags(tags), time.Microsecond)
 }
 
 func (s *subScope) NewPerInstanceTimer(name string, tags map[string]string) Timer {
 	return s.registry.newTimerWithTagSet(joinScopes(s.name, name),
-		s.tags.MergePerInstanceTags(tags))
+		s.tags.MergePerInstanceTags(tags), time.Microsecond)
+}
+
+func (s *subScope) NewMilliTimer(name string) Timer {
+	return s.NewMilliTimerWithTags(name, nil)
+}
+
+func (s *subScope) NewMilliTimerWithTags(name string, tags map[string]string) Timer {
+	return s.registry.newTimerWithTagSet(joinScopes(s.name, name), s.tags.MergeTags(tags), time.Millisecond)
+}
+
+func (s *subScope) NewPerInstanceMilliTimer(name string, tags map[string]string) Timer {
+	return s.registry.newTimerWithTagSet(joinScopes(s.name, name),
+		s.tags.MergePerInstanceTags(tags), time.Millisecond)
 }
 
 func joinScopes(parent, child string) string {
