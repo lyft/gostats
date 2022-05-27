@@ -58,6 +58,21 @@ func TestTimer(t *testing.T) {
 	}
 }
 
+// Ensure millitimers and timespans are working
+func TestMilliTimer(t *testing.T) {
+	testDuration := 420 * time.Millisecond
+	sink := &testStatSink{}
+	store := NewStore(sink, true)
+	store.NewMilliTimer("test").AllocateSpan().CompleteWithDuration(testDuration)
+	store.Flush()
+
+	expected := "test:420.000000|ms"
+	timer := sink.record
+	if !strings.Contains(timer, expected) {
+		t.Error("wanted timer value of test:420.000000|ms, got", timer)
+	}
+}
+
 // Ensure 0 counters are flushed
 func TestZeroCounters(t *testing.T) {
 	sink := &testStatSink{}
