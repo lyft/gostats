@@ -288,7 +288,7 @@ func (t *timer) time(dur time.Duration) {
 }
 
 func (t *timer) AddDuration(dur time.Duration) {
-	t.sink.FlushTimer(t.name, float64(dur/t.base))
+	t.AddValue(float64(dur / t.base))
 }
 
 func (t *timer) AddValue(value float64) {
