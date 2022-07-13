@@ -73,14 +73,14 @@ func TestMilliTimer(t *testing.T) {
 	}
 }
 
-// Ensure 0 counters are flushed
+// Ensure 0 counters are not flushed
 func TestZeroCounters(t *testing.T) {
 	sink := &testStatSink{}
 	store := NewStore(sink, true)
 	store.NewCounter("test")
 	store.Flush()
 
-	expected := "test:0|c\n"
+	expected := ""
 	counter := sink.record
 	if counter != expected {
 		t.Errorf("wanted %q got %q", expected, counter)
