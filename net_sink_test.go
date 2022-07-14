@@ -17,9 +17,11 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
-
-	logger "github.com/sirupsen/logrus"
 )
+
+func foreverNow() time.Time {
+	return time.Date(2022, 1, 1, 0, 0, 0, 0, time.UTC)
+}
 
 type testStatSink struct {
 	sync.Mutex
@@ -542,10 +544,8 @@ func TestNetSink_DrainFlushQueue(t *testing.T) {
 	}
 }
 
-func discardLogger() *logger.Logger {
-	log := logger.New()
-	log.Out = ioutil.Discard
-	return log
+func discardLogger() *loggingSink {
+	return &loggingSink{writer: ioutil.Discard, now: foreverNow}
 }
 
 func setupTestNetSink(t *testing.T, protocol string, stop bool) (*netTestSink, *netSink) {

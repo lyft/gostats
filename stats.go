@@ -7,7 +7,6 @@ import (
 	"time"
 
 	tagspkg "github.com/lyft/gostats/internal/tags"
-	logger "github.com/sirupsen/logrus"
 )
 
 // A Store holds statistics.
@@ -200,7 +199,6 @@ func NewDefaultStore() Store {
 	var newStore Store
 	settings := GetSettings()
 	if !settings.UseStatsd {
-		logger.Warn("statsd is not in use")
 		if settings.LoggingSinkDisabled {
 			newStore = NewStore(NewNullSink(), false)
 		} else {
