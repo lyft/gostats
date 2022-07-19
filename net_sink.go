@@ -6,12 +6,21 @@ import (
 	"fmt"
 	"math"
 	"net"
+	"os"
 	"strconv"
 	"sync"
 	"time"
-
-	logger "github.com/sirupsen/logrus"
 )
+
+// Logger is used to log errors and other important operational
+// information while using gostats.
+//
+// For convenience of transitioning from logrus to zap, this interface
+// conforms BOTH to logrus.Logger as well as the Zap's Sugared logger.
+type Logger interface {
+	Errorf(msg string, args ...interface{})
+	Warnf(msg string, args ...interface{})
+}
 
 const (
 	defaultRetryInterval = time.Second * 3
@@ -67,9 +76,8 @@ func WithStatsdPort(port int) SinkOption {
 }
 
 // WithLogger configures the sink to use the provided logger otherwise
-// the standard logrus logger is used.
-func WithLogger(log *logger.Logger) SinkOption {
-	// TODO (CEV): use the zap.Logger
+// the built-in zap-like logger is used.
+func WithLogger(log Logger) SinkOption {
 	return sinkOptionFunc(func(sink *netSink) {
 		sink.log = log
 	})
@@ -89,8 +97,9 @@ func NewNetSink(opts ...SinkOption) FlushableSink {
 		// arbitrarily buffered
 		doFlush: make(chan chan struct{}, 8),
 
-		// CEV: default to the standard logger to match the legacy implementation.
-		log: logger.StandardLogger(),
+		// default logging sink mimics the previously-used logrus
+		// logger by logging to stderr
+		log: &loggingSink{writer: os.Stderr, now: time.Now},
 
 		// TODO (CEV): auto loading from the env is bad and should be removed.
 		conf: GetSettings(),
@@ -127,7 +136,7 @@ type netSink struct {
 	bufWriter    *bufio.Writer
 	doFlush      chan chan struct{}
 	droppedBytes uint64
-	log          *logger.Logger
+	log          Logger
 	conf         Settings
 }
 
@@ -185,9 +194,7 @@ func (s *netSink) drainFlushQueue() {
 func (s *netSink) handleFlushErrorSize(err error, dropped int) {
 	d := uint64(dropped)
 	if (s.droppedBytes+d)%logOnEveryNDroppedBytes > s.droppedBytes%logOnEveryNDroppedBytes {
-		s.log.WithField("total_dropped_bytes", s.droppedBytes+d).
-			WithField("dropped_bytes", d).
-			Error(err)
+		s.log.Errorf("dropped %d bytes: %s", s.droppedBytes+d, err)
 	}
 	s.droppedBytes += d
 
@@ -275,7 +282,7 @@ func (s *netSink) run() {
 	for {
 		if s.conn == nil {
 			if err := s.connect(addr); err != nil {
-				s.log.Warnf("statsd connection error: %s", err)
+				s.log.Warnf("connection error: %s", err)
 
 				// If the previous reconnect attempt failed, drain the flush
 				// queue to prevent Flush() from blocking indefinitely.
@@ -400,7 +407,7 @@ func (b *buffer) WriteString(s string) {
 // This is named WriteChar instead of WriteByte because the 'stdmethods' check
 // of 'go vet' wants WriteByte to have the signature:
 //
-// 	func (b *buffer) WriteByte(c byte) error { ... }
+//	func (b *buffer) WriteByte(c byte) error { ... }
 //
 func (b *buffer) WriteChar(c byte) {
 	*b = append(*b, c)
