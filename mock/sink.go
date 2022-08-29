@@ -402,10 +402,9 @@ func (t *fatalBench) Errorf(format string, args ...interface{}) {
 //
 // Examples of Fatal() can be found in the sink test code.
 //
-// 	var sink Sink
-// 	var t *testing.T
-// 	sink.AssertCounterEquals(Must(t), "name", 1)
-//
+//	var sink Sink
+//	var t *testing.T
+//	sink.AssertCounterEquals(Must(t), "name", 1)
 func Fatal(tb testing.TB) testing.TB {
 	switch t := tb.(type) {
 	case *testing.T:
@@ -432,7 +431,6 @@ func Fatal(tb testing.TB) testing.TB {
 //	if !reflect.DeepEqual(tags, expected) {
 //		panic(fmt.Sprintf("Tags: got: %q want: %q", tags, expected))
 //	}
-//
 func ParseTags(stat string) (string, map[string]string) {
 	return tags.ParseTags(stat)
 }
@@ -444,7 +442,6 @@ func ParseTags(stat string) (string, map[string]string) {
 //		"key_2": "val_2"
 //	}
 //	s.AssertCounterExists(tb, SerializeTags("name", tags))
-//
 func SerializeTags(name string, tagsm map[string]string) string {
 	return tags.SerializeTags(name, tagsm)
 }

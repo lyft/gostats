@@ -11,17 +11,20 @@ import (
 
 // A Store holds statistics.
 // There are two options when creating a new store:
-//  create a store backed by a tcp_sink to statsd
-//  s := stats.NewDefaultStore()
-//  create a store with a user provided Sink
-//  s := stats.NewStore(sink, true)
+//
+//	create a store backed by a tcp_sink to statsd
+//	s := stats.NewDefaultStore()
+//	create a store with a user provided Sink
+//	s := stats.NewStore(sink, true)
+//
 // Currently that only backing store supported is statsd via a TCP sink, https://github.com/lyft/gostats/blob/master/tcp_sink.go.
 // However, implementing other Sinks (https://github.com/lyft/gostats/blob/master/sink.go) should be simple.
 //
 // A store holds Counters, Gauges, and Timers. You can add unscoped Counters, Gauges, and Timers to the store
 // with:
-//  s := stats.NewDefaultStore()
-//  c := s.New[Counter|Gauge|Timer]("name")
+//
+//	s := stats.NewDefaultStore()
+//	c := s.New[Counter|Gauge|Timer]("name")
 type Store interface {
 	// Flush Counters and Gauges to the Sink attached to the Store.
 	// To flush the store at a regular interval call the
@@ -46,16 +49,19 @@ type Store interface {
 }
 
 // A Scope namespaces Statistics.
-//  store := stats.NewDefaultStore()
-//  scope := stats.Scope("service")
-//  // the following counter will be emitted at the stats tree rooted at `service`.
-//  c := scope.NewCounter("success")
+//
+//	store := stats.NewDefaultStore()
+//	scope := stats.Scope("service")
+//	// the following counter will be emitted at the stats tree rooted at `service`.
+//	c := scope.NewCounter("success")
+//
 // Additionally you can create subscopes:
-//  store := stats.NewDefaultStore()
-//  scope := stats.Scope("service")
-//  networkScope := scope.Scope("network")
-//  // the following counter will be emitted at the stats tree rooted at service.network.
-//  c := networkScope.NewCounter("requests")
+//
+//	store := stats.NewDefaultStore()
+//	scope := stats.Scope("service")
+//	networkScope := scope.Scope("network")
+//	// the following counter will be emitted at the stats tree rooted at service.network.
+//	c := networkScope.NewCounter("requests")
 type Scope interface {
 	// Scope creates a subscope.
 	Scope(name string) Scope
@@ -161,11 +167,17 @@ type Timer interface {
 
 // A Timespan is used to measure spans of time.
 // They measure time from the time they are allocated by a Timer with
-//   AllocateSpan()
+//
+//	AllocateSpan()
+//
 // until they call
-//   Complete()
+//
+//	Complete()
+//
 // or
-//   CompleteWithDuration(time.Duration)
+//
+//	CompleteWithDuration(time.Duration)
+//
 // When either function is called the timespan is flushed.
 // When Complete is called the timespan is flushed.
 //
@@ -181,7 +193,9 @@ type Timespan interface {
 
 // A StatGenerator can be used to programatically generate stats.
 // StatGenerators are added to a store via
-//  AddStatGenerator(StatGenerator)
+//
+//	AddStatGenerator(StatGenerator)
+//
 // An example is https://github.com/lyft/gostats/blob/master/runtime.go.
 type StatGenerator interface {
 	// Runs the StatGenerator to generate Stats.

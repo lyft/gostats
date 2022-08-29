@@ -408,7 +408,6 @@ func (b *buffer) WriteString(s string) {
 // of 'go vet' wants WriteByte to have the signature:
 //
 //	func (b *buffer) WriteByte(c byte) error { ... }
-//
 func (b *buffer) WriteChar(c byte) {
 	*b = append(*b, c)
 }
