@@ -5,7 +5,6 @@ import (
 	"context"
 	"fmt"
 	"io"
-	"io/ioutil"
 	"net"
 	"os"
 	"os/exec"
@@ -386,7 +385,7 @@ func TestNetSink_Flush(t *testing.T) {
 		for {
 			conn, err := lc.Accept()
 			if err == nil {
-				_, err = io.Copy(ioutil.Discard, conn)
+				_, err = io.Copy(io.Discard, conn)
 			}
 			if err != nil {
 				return
@@ -545,7 +544,7 @@ func TestNetSink_DrainFlushQueue(t *testing.T) {
 }
 
 func discardLogger() *loggingSink {
-	return &loggingSink{writer: ioutil.Discard, now: foreverNow}
+	return &loggingSink{writer: io.Discard, now: foreverNow}
 }
 
 func setupTestNetSink(t *testing.T, protocol string, stop bool) (*netTestSink, *netSink) {
@@ -775,7 +774,7 @@ func buildBinary(t testing.TB, path string) (string, func()) {
 		binaryName = filepath.Base(path)
 	}
 
-	tmpdir, err := ioutil.TempDir("", "gostats-")
+	tmpdir, err := os.MkdirTemp("", "gostats-")
 	if err != nil {
 		t.Fatalf("creating tempdir: %v", err)
 	}
