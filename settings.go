@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"strconv"
+	"time"
 )
 
 const (
@@ -108,4 +109,9 @@ func GetSettings() Settings {
 		FlushIntervalS:      flushIntervalS,
 		LoggingSinkDisabled: loggingSinkDisabled,
 	}
+}
+
+// FlushInterval returns the flush interval duration.
+func (s *Settings) FlushInterval() time.Duration {
+	return time.Duration(s.FlushIntervalS) * time.Second
 }
