@@ -4,6 +4,7 @@ import (
 	"os"
 	"reflect"
 	"testing"
+	"time"
 
 	"github.com/kelseyhightower/envconfig"
 )
@@ -131,5 +132,18 @@ func TestSettingsErrors(t *testing.T) {
 				t.Errorf("Settings expected a panic for invalid value %s=%s", key, val)
 			}
 		})
+	}
+}
+
+func TestFlushInterval(t *testing.T) {
+	reset := testSetenv(t,
+		"GOSTATS_FLUSH_INTERVAL_SECONDS", "3",
+	)
+	defer reset()
+	settings := GetSettings()
+	interval := settings.FlushInterval()
+	expected := time.Duration(3) * time.Second
+	if interval != expected {
+		t.Errorf("Flush interval does not match expected duration %s != %s", interval, expected)
 	}
 }
