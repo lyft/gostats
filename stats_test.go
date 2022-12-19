@@ -43,6 +43,72 @@ func TestStats(t *testing.T) {
 	wg.Wait()
 }
 
+// TestStatsStartMultipleTimes ensures starting a periodic flush twice
+// works as expected.
+func TestStatsStartMultipleTimes(t *testing.T) {
+	sink := &testStatSink{}
+	store := NewStore(sink, true)
+
+	// we check to make sure the two stop channels are different,
+	// that's the best we can do.
+	store.Start(time.NewTicker(1 * time.Minute))
+
+	// grab the stop channel
+	realStore := store.(*statStore)
+	stopChan1 := realStore.stop
+
+	store.Start(time.NewTicker(10 * time.Hour))
+
+	// grab the new stop channel
+	stopChan2 := realStore.stop
+
+	if stopChan1 == stopChan2 {
+		t.Error("two stop channels are the same")
+	}
+}
+
+// TestStatsStartStop ensures starting a periodic flush can be
+// stopped.
+func TestStatsStartStop(t *testing.T) {
+	sink := &testStatSink{}
+	store := NewStore(sink, true)
+
+	store.Start(time.NewTicker(1 * time.Minute))
+	store.Stop()
+
+	realStore := store.(*statStore)
+
+	// we check to make sure the two stop channel is nil'ed out, that
+	// is the best we can do to avoid flakey time based tests.
+	if realStore.stop != nil {
+		t.Errorf("expected stop channel to be nil")
+	}
+}
+
+// TestStatsStartStopMultipleTimes ensures starting a periodic flush
+// can be stopped, even if called multiple times.
+func TestStatsStartStopMultipleTimes(t *testing.T) {
+	sink := &testStatSink{}
+	store := NewStore(sink, true)
+
+	// ensure we can call it if no ticker was ever started
+	store.Stop()
+
+	// start one, and stop many times.
+	store.Start(time.NewTicker(1 * time.Minute))
+	store.Stop()
+	store.Stop()
+	store.Stop()
+
+	realStore := store.(*statStore)
+
+	// we check to make sure the two stop channel is nil'ed out, that
+	// is the best we can do to avoid flakey time based tests.
+	if realStore.stop != nil {
+		t.Errorf("expected stop channel to be nil")
+	}
+}
+
 // Ensure timers and timespans are working
 func TestTimer(t *testing.T) {
 	testDuration := time.Duration(9800000)
