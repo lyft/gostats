@@ -388,8 +388,8 @@ func (s *statStore) stopLocked() {
 		return
 	}
 
-	// send a signal to flush goroutine to stop
-	s.stop <- true
+	// close to make the flush goroutine stop
+	close(s.stop)
 
 	// wait for the flush goroutine to fully stop
 	s.wg.Wait()
