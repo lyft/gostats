@@ -40,8 +40,18 @@ type Store interface {
 	// and flush all the Counters and Gauges registered with it.
 	Flush()
 
-	// Start a timer for periodic stat Flushes.
+	// Start a timer for periodic stat flushes.
+	//
+	// If Start is called multiple times, the previous ticker is
+	// stopped and a new replacement ticker is started. It is
+	// equivalent to calling Stop() and then Start() with the new
+	// ticker.
 	Start(*time.Ticker)
+
+	// Stop stops the running periodic flush timer.
+	//
+	// If no periodic flush is currently active, this is a no-op.
+	Stop()
 
 	// Add a StatGenerator to the Store that programatically generates stats.
 	AddStatGenerator(StatGenerator)
@@ -331,18 +341,78 @@ type statStore struct {
 	gauges   sync.Map
 	timers   sync.Map
 
-	genMtx         sync.RWMutex
+	mu             sync.RWMutex
 	statGenerators []StatGenerator
+	stop           chan bool
+	wg             *sync.WaitGroup
 
 	sink Sink
 }
 
+func (s *statStore) Start(ticker *time.Ticker) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	// if there is already a stop channel allocated, that means there
+	// is a ticker running - we will replace the ticker now.
+	if s.stop != nil {
+		s.stopLocked()
+	}
+
+	stopChan := make(chan bool, 1)
+	wg := &sync.WaitGroup{}
+	wg.Add(1)
+
+	s.stop = stopChan
+	s.wg = wg
+
+	go func() {
+		defer wg.Done()
+		for {
+			select {
+			case <-ticker.C:
+				s.Flush()
+			case <-stopChan:
+				return
+			}
+		}
+	}()
+}
+
+// stopLocked is the core of the stop implementation, but without a
+// lock.
+func (s *statStore) stopLocked() {
+	// if the stop channel is nil, there is no ticker running, so this
+	// is a no-op.
+	if s.stop == nil {
+		return
+	}
+
+	// close to make the flush goroutine stop
+	close(s.stop)
+
+	// wait for the flush goroutine to fully stop
+	s.wg.Wait()
+
+	// nil out the stop channel
+	s.stop = nil
+
+	// nil out the wait group for tidyness
+	s.wg = nil
+}
+
+func (s *statStore) Stop() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.stopLocked()
+}
+
 func (s *statStore) Flush() {
-	s.genMtx.RLock()
+	s.mu.RLock()
 	for _, g := range s.statGenerators {
 		g.GenerateStats()
 	}
-	s.genMtx.RUnlock()
+	s.mu.RUnlock()
 
 	s.counters.Range(func(key, v interface{}) bool {
 		// do not flush counters that are set to zero
@@ -363,20 +433,10 @@ func (s *statStore) Flush() {
 	}
 }
 
-func (s *statStore) Start(ticker *time.Ticker) {
-	s.run(ticker)
-}
-
 func (s *statStore) AddStatGenerator(statGenerator StatGenerator) {
-	s.genMtx.Lock()
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	s.statGenerators = append(s.statGenerators, statGenerator)
-	s.genMtx.Unlock()
-}
-
-func (s *statStore) run(ticker *time.Ticker) {
-	for range ticker.C {
-		s.Flush()
-	}
 }
 
 func (s *statStore) Store() Store {
