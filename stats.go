@@ -366,7 +366,7 @@ func (s *statStore) Start(ticker *time.Ticker) {
 	s.stop = stopChan
 	s.wg = wg
 
-	go func(stopChan chan bool, wg *sync.WaitGroup) {
+	go func() {
 		defer wg.Done()
 		for {
 			select {
@@ -376,7 +376,7 @@ func (s *statStore) Start(ticker *time.Ticker) {
 				return
 			}
 		}
-	}(stopChan, wg)
+	}()
 }
 
 // stopLocked is the core of the stop implementation, but without a
