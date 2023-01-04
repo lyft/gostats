@@ -96,10 +96,10 @@ func (s *loggingSink) Flush() { s.log("", "all stats", 0) }
 
 // Logger
 
-func (s *loggingSink) Errorf(msg string, args ...interface{}) {
-	s.logMessage("error", fmt.Sprintf(msg, args...))
+func (s *loggingSink) Error(msg string, args ...interface{}) {
+	s.logMessage("error", msg)
 }
 
-func (s *loggingSink) Warnf(msg string, args ...interface{}) {
-	s.logMessage("warn", fmt.Sprintf(msg, args...))
+func (s *loggingSink) Warn(msg string, args ...interface{}) {
+	s.logMessage("warn", msg)
 }

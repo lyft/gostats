@@ -3,6 +3,7 @@ package stats
 import (
 	"bufio"
 	"bytes"
+	"errors"
 	"fmt"
 	"math"
 	"net"
@@ -18,8 +19,8 @@ import (
 // For convenience of transitioning from logrus to zap, this interface
 // conforms BOTH to logrus.Logger as well as the Zap's Sugared logger.
 type Logger interface {
-	Errorf(msg string, args ...interface{})
-	Warnf(msg string, args ...interface{})
+	Error(msg string, args ...interface{})
+	Warn(msg string, args ...interface{})
 }
 
 const (
@@ -152,7 +153,7 @@ func (w *sinkWriter) Write(p []byte) (int, error) {
 	case w.outc <- dest:
 		return n, nil
 	default:
-		return 0, fmt.Errorf("statsd channel full, dropping stats buffer with %d bytes", n)
+		return 0, errors.New("statsd channel full, dropping stats buffer")
 	}
 }
 
@@ -194,7 +195,7 @@ func (s *netSink) drainFlushQueue() {
 func (s *netSink) handleFlushErrorSize(err error, dropped int) {
 	d := uint64(dropped)
 	if (s.droppedBytes+d)%logOnEveryNDroppedBytes > s.droppedBytes%logOnEveryNDroppedBytes {
-		s.log.Errorf("dropped %d bytes: %s", s.droppedBytes+d, err)
+		s.log.Error(fmt.Sprintf("dropped %d bytes: %s", s.droppedBytes+d, err))
 	}
 	s.droppedBytes += d
 
@@ -282,7 +283,7 @@ func (s *netSink) run() {
 	for {
 		if s.conn == nil {
 			if err := s.connect(addr); err != nil {
-				s.log.Warnf("connection error: %s", err)
+				s.log.Warn(fmt.Sprintf("connection error: %s", err))
 
 				// If the previous reconnect attempt failed, drain the flush
 				// queue to prevent Flush() from blocking indefinitely.
