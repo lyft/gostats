@@ -7,6 +7,8 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/hashicorp/golang-lru/v2"
+
 	tagspkg "github.com/lyft/gostats/internal/tags"
 )
 
@@ -214,7 +216,18 @@ type StatGenerator interface {
 // NewStore returns an Empty store that flushes to Sink passed as an argument.
 // Note: the export argument is unused.
 func NewStore(sink Sink, _ bool) Store {
-	return &statStore{sink: sink}
+	// TODO(crockeo): decide how this should be configurable
+	cacheSize := 8192
+
+	s := &statStore{sink: sink}
+
+	// lru.NewWithEvict can only return a non-nil error when cacheSize < 0,
+	// so it's safe to ignore.
+	s.counters, _ = lru.NewWithEvict(cacheSize, s.flushCounter)
+	s.gauges, _ = lru.NewWithEvict(cacheSize, s.flushGauge)
+	s.timers, _ = lru.New[string, *timer](cacheSize)
+
+	return s
 }
 
 // NewDefaultStore returns a Store with a TCP statsd sink, and a running flush timer.
@@ -336,9 +349,9 @@ func (ts *timespan) CompleteWithDuration(value time.Duration) {
 }
 
 type statStore struct {
-	counters sync.Map
-	gauges   sync.Map
-	timers   sync.Map
+	counters *lru.Cache[string, *counter]
+	gauges   *lru.Cache[string, *gauge]
+	timers   *lru.Cache[string, *timer]
 
 	mu             sync.RWMutex
 	statGenerators []StatGenerator
@@ -369,23 +382,40 @@ func (s *statStore) Flush() {
 	}
 	s.mu.RUnlock()
 
-	s.counters.Range(func(key, v interface{}) bool {
-		// do not flush counters that are set to zero
-		if value := v.(*counter).latch(); value != 0 {
-			s.sink.FlushCounter(key.(string), value)
+	for _, name := range s.counters.Keys() {
+		counter, ok := s.counters.Peek(name)
+		if !ok {
+			// This counter was removed between retrieving the names
+			// and finding this specific counter.
+			continue
 		}
-		return true
-	})
+		s.flushCounter(name, counter)
+	}
 
-	s.gauges.Range(func(key, v interface{}) bool {
-		s.sink.FlushGauge(key.(string), v.(*gauge).Value())
-		return true
-	})
+	for _, name := range s.gauges.Keys() {
+		gauge, ok := s.gauges.Peek(name)
+		if !ok {
+			// This gauge was removed between retrieving the names
+			// and finding this specific gauge.
+			continue
+		}
+		s.flushGauge(name, gauge)
+	}
 
 	flushableSink, ok := s.sink.(FlushableSink)
 	if ok {
 		flushableSink.Flush()
 	}
+}
+
+func (s *statStore) flushCounter(name string, counter *counter) {
+	if value := counter.latch(); value != 0 {
+		s.sink.FlushCounter(name, value)
+	}
+}
+
+func (s *statStore) flushGauge(key string, gauge *gauge) {
+	s.sink.FlushGauge(key, gauge.Value())
 }
 
 func (s *statStore) AddStatGenerator(statGenerator StatGenerator) {
@@ -407,14 +437,14 @@ func (s *statStore) ScopeWithTags(name string, tags map[string]string) Scope {
 }
 
 func (s *statStore) newCounter(serializedName string) *counter {
-	if v, ok := s.counters.Load(serializedName); ok {
-		return v.(*counter)
+	if counter, ok := s.counters.Get(serializedName); ok {
+		return counter
 	}
-	c := new(counter)
-	if v, loaded := s.counters.LoadOrStore(serializedName, c); loaded {
-		return v.(*counter)
+	counter := new(counter)
+	if existingCounter, ok, _ := s.counters.PeekOrAdd(serializedName, counter); ok {
+		return existingCounter
 	}
-	return c
+	return counter
 }
 
 func (s *statStore) NewCounter(name string) Counter {
@@ -442,14 +472,14 @@ func (s *statStore) NewPerInstanceCounter(name string, tags map[string]string) C
 }
 
 func (s *statStore) newGauge(serializedName string) *gauge {
-	if v, ok := s.gauges.Load(serializedName); ok {
-		return v.(*gauge)
+	if gauge, ok := s.gauges.Get(serializedName); ok {
+		return gauge
 	}
-	g := new(gauge)
-	if v, loaded := s.gauges.LoadOrStore(serializedName, g); loaded {
-		return v.(*gauge)
+	gauge := new(gauge)
+	if existingGauge, ok, _ := s.gauges.PeekOrAdd(serializedName, gauge); ok {
+		return existingGauge
 	}
-	return g
+	return gauge
 }
 
 func (s *statStore) NewGauge(name string) Gauge {
@@ -475,14 +505,14 @@ func (s *statStore) NewPerInstanceGauge(name string, tags map[string]string) Gau
 }
 
 func (s *statStore) newTimer(serializedName string, base time.Duration) *timer {
-	if v, ok := s.timers.Load(serializedName); ok {
-		return v.(*timer)
+	if timer, ok := s.timers.Get(serializedName); ok {
+		return timer
 	}
-	t := &timer{name: serializedName, sink: s.sink, base: base}
-	if v, loaded := s.timers.LoadOrStore(serializedName, t); loaded {
-		return v.(*timer)
+	timer := &timer{name: serializedName, sink: s.sink, base: base}
+	if existingTimer, ok, _ := s.timers.PeekOrAdd(serializedName, timer); ok {
+		return existingTimer
 	}
-	return t
+	return timer
 }
 
 func (s *statStore) NewMilliTimer(name string) Timer {

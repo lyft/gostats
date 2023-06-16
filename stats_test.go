@@ -173,8 +173,8 @@ func TestTagMapNotModified(t *testing.T) {
 	}
 
 	scopeGenerators := map[string]func() Scope{
-		"statStore": func() Scope { return &statStore{} },
-		"subScope":  func() Scope { return newSubScope(&statStore{}, "name", nil) },
+		"statStore": func() Scope { return NewStore(nil, false) },
+		"subScope":  func() Scope { return newSubScope(NewStore(nil, false).(*statStore), "name", nil) },
 	}
 
 	methodTestCases := map[string]TagMethod{
@@ -333,7 +333,7 @@ func TestPerInstanceStats(t *testing.T) {
 	testPerInstanceMethods := func(t *testing.T, setupScope func(Scope) Scope) {
 		for _, x := range testCases {
 			sink := mock.NewSink()
-			scope := setupScope(&statStore{sink: sink})
+			scope := setupScope(NewStore(sink, false).(*statStore))
 
 			scope.NewPerInstanceCounter("name", x.tags).Inc()
 			scope.NewPerInstanceGauge("name", x.tags).Inc()
