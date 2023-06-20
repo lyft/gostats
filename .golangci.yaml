@@ -1,7 +1,6 @@
 linters:
   disable-all: true
   enable:
-    - depguard
     - gofumpt
     - goimports
     - gosimple

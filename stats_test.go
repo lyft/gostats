@@ -18,7 +18,7 @@ import (
 )
 
 // Ensure flushing and adding generators does not race
-func TestStats(t *testing.T) {
+func TestStats(_ *testing.T) {
 	sink := &testStatSink{}
 	store := NewStore(sink, true)
 
@@ -46,7 +46,7 @@ func TestStats(t *testing.T) {
 
 // TestStatsStartContext ensures that a cancelled context cancels a
 // flushing goroutine.
-func TestStatsStartContext(t *testing.T) {
+func TestStatsStartContext(_ *testing.T) {
 	sink := &testStatSink{}
 	store := NewStore(sink, true)
 

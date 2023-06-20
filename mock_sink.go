@@ -44,7 +44,7 @@ func (m *MockSink) FlushGauge(name string, value uint64) {
 }
 
 // FlushTimer satisfies the Sink interface.
-func (m *MockSink) FlushTimer(name string, value float64) {
+func (m *MockSink) FlushTimer(name string, value float64) { //nolint:revive
 	m.tLock.Lock()
 	defer m.tLock.Unlock()
 	m.Timers[name]++
