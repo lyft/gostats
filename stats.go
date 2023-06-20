@@ -409,10 +409,6 @@ func (s *statStore) flushCounter(name string, counter *counter) {
 	}
 }
 
-func (s *statStore) flushGauge(key string, gauge *gauge) {
-	s.sink.FlushGauge(key, gauge.Value())
-}
-
 func (s *statStore) AddStatGenerator(statGenerator StatGenerator) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -432,14 +428,14 @@ func (s *statStore) ScopeWithTags(name string, tags map[string]string) Scope {
 }
 
 func (s *statStore) newCounter(serializedName string) *counter {
-	if counter, ok := s.counters.Get(serializedName); ok {
-		return counter
+	if v, ok := s.counters.Get(serializedName); ok {
+		return v
 	}
-	counter := new(counter)
-	if existingCounter, ok, _ := s.counters.PeekOrAdd(serializedName, counter); ok {
-		return existingCounter
+	c := new(counter)
+	if v, ok, _ := s.counters.PeekOrAdd(serializedName, c); ok {
+		return v
 	}
-	return counter
+	return c
 }
 
 func (s *statStore) NewCounter(name string) Counter {
@@ -500,14 +496,14 @@ func (s *statStore) NewPerInstanceGauge(name string, tags map[string]string) Gau
 }
 
 func (s *statStore) newTimer(serializedName string, base time.Duration) *timer {
-	if timer, ok := s.timers.Get(serializedName); ok {
-		return timer
+	if v, ok := s.timers.Get(serializedName); ok {
+		return v
 	}
-	timer := &timer{name: serializedName, sink: s.sink, base: base}
-	if existingTimer, ok, _ := s.timers.PeekOrAdd(serializedName, timer); ok {
-		return existingTimer
+	t := &timer{name: serializedName, sink: s.sink, base: base}
+	if v, ok, _ := s.timers.PeekOrAdd(serializedName, t); ok {
+		return v
 	}
-	return timer
+	return t
 }
 
 func (s *statStore) NewMilliTimer(name string) Timer {
