@@ -221,10 +221,8 @@ func NewStore(sink Sink, _ bool) Store {
 
 	s := &statStore{sink: sink}
 
-	// lru.NewWithEvict can only return a non-nil error when cacheSize < 0,
-	// so it's safe to ignore.
+	// lru.NewWithEvict can only return a non-nil error when cacheSize < 0.
 	s.counters, _ = lru.NewWithEvict(cacheSize, s.flushCounter)
-	s.gauges, _ = lru.NewWithEvict(cacheSize, s.flushGauge)
 	s.timers, _ = lru.New[string, *timer](cacheSize)
 
 	return s
@@ -350,8 +348,10 @@ func (ts *timespan) CompleteWithDuration(value time.Duration) {
 
 type statStore struct {
 	counters *lru.Cache[string, *counter]
-	gauges   *lru.Cache[string, *gauge]
 	timers   *lru.Cache[string, *timer]
+	// Gauges must not be expunged because they are client-side stateful.
+	// We use a sync.Map instead of a cache to ensure they are kept indefinitely.
+	gauges   sync.Map
 
 	mu             sync.RWMutex
 	statGenerators []StatGenerator
@@ -392,15 +392,10 @@ func (s *statStore) Flush() {
 		s.flushCounter(name, counter)
 	}
 
-	for _, name := range s.gauges.Keys() {
-		gauge, ok := s.gauges.Peek(name)
-		if !ok {
-			// This gauge was removed between retrieving the names
-			// and finding this specific gauge.
-			continue
-		}
-		s.flushGauge(name, gauge)
-	}
+	s.gauges.Range(func (key any, v any) bool {
+		s.sink.FlushGauge(key.(string), v.(*gauge).Value())
+		return true
+	})
 
 	flushableSink, ok := s.sink.(FlushableSink)
 	if ok {
@@ -472,14 +467,14 @@ func (s *statStore) NewPerInstanceCounter(name string, tags map[string]string) C
 }
 
 func (s *statStore) newGauge(serializedName string) *gauge {
-	if gauge, ok := s.gauges.Get(serializedName); ok {
-		return gauge
+	if v, ok := s.gauges.Load(serializedName); ok {
+		return v.(*gauge)
 	}
-	gauge := new(gauge)
-	if existingGauge, ok, _ := s.gauges.PeekOrAdd(serializedName, gauge); ok {
-		return existingGauge
+	g := new(gauge)
+	if v, loaded := s.gauges.LoadOrStore(serializedName, g); loaded {
+		return v.(*gauge)
 	}
-	return gauge
+	return g
 }
 
 func (s *statStore) NewGauge(name string) Gauge {
