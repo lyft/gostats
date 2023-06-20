@@ -351,7 +351,7 @@ type statStore struct {
 	timers   *lru.Cache[string, *timer]
 	// Gauges must not be expunged because they are client-side stateful.
 	// We use a sync.Map instead of a cache to ensure they are kept indefinitely.
-	gauges   sync.Map
+	gauges sync.Map
 
 	mu             sync.RWMutex
 	statGenerators []StatGenerator
@@ -392,7 +392,7 @@ func (s *statStore) Flush() {
 		s.flushCounter(name, counter)
 	}
 
-	s.gauges.Range(func (key any, v any) bool {
+	s.gauges.Range(func(key, v interface{}) bool {
 		s.sink.FlushGauge(key.(string), v.(*gauge).Value())
 		return true
 	})
