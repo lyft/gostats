@@ -7,8 +7,8 @@ import (
 	"sync/atomic"
 	"time"
 
-	lru "github.com/lyft/gostats/internal/vendored/hashicorp/golang-lru"
 	tagspkg "github.com/lyft/gostats/internal/tags"
+	lru "github.com/lyft/gostats/internal/vendored/hashicorp/golang-lru"
 )
 
 // A Store holds statistics.
