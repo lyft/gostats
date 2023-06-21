@@ -7,8 +7,7 @@ import (
 	"sync/atomic"
 	"time"
 
-	lru "github.com/hashicorp/golang-lru/v2"
-
+	lru "github.com/lyft/gostats/internal/vendored/hashicorp/golang-lru"
 	tagspkg "github.com/lyft/gostats/internal/tags"
 )
 
