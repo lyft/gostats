@@ -216,12 +216,10 @@ type StatGenerator interface {
 // NewStore returns an Empty store that flushes to Sink passed as an argument.
 // Note: the export argument is unused.
 func NewStore(sink Sink, _ bool) Store {
-	// TODO(crockeo): decide how this should be configurable
-	cacheSize := 8192
-
 	s := &statStore{sink: sink}
 
 	// lru.NewWithEvict can only return a non-nil error when cacheSize < 0.
+	cacheSize := 65536
 	s.counters, _ = lru.NewWithEvict(cacheSize, s.flushCounter)
 	s.timers, _ = lru.New[string, *timer](cacheSize)
 
