@@ -291,7 +291,7 @@ func TestSink_ThreadSafe(t *testing.T) {
 	sink.AssertGaugeEquals(t, "name", uint64(1))
 }
 
-func TestSink_ThreadSafe_Reset(t *testing.T) {
+func TestSink_ThreadSafe_Reset(_ *testing.T) {
 	const N = 2000
 	sink := mock.NewSink()
 	funcs := [...]func(){
