@@ -468,7 +468,7 @@ func BenchmarkParallelCounter(b *testing.B) {
 
 func BenchmarkStoreNewPerInstanceCounter(b *testing.B) {
 	b.Run("HasTag", func(b *testing.B) {
-		var store statStore
+		store := NewStore(nil, false)
 		tags := map[string]string{
 			"1":  "1",
 			"2":  "2",
@@ -481,7 +481,7 @@ func BenchmarkStoreNewPerInstanceCounter(b *testing.B) {
 	})
 
 	b.Run("MissingTag", func(b *testing.B) {
-		var store statStore
+		store := NewStore(nil, false)
 		tags := map[string]string{
 			"1": "1",
 			"2": "2",
