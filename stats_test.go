@@ -493,3 +493,20 @@ func BenchmarkStoreNewPerInstanceCounter(b *testing.B) {
 		}
 	})
 }
+
+func BenchmarkStoreNewCounterParallel(b *testing.B) {
+	s := NewStore(nullSink{}, false)
+	t := time.NewTicker(time.Hour) // don't flush
+	defer t.Stop()
+	go s.Start(t)
+	names := new([2048]string)
+	for i := 0; i < len(names); i++ {
+		names[i] = "counter_" + strconv.Itoa(i)
+	}
+	b.ResetTimer()
+	b.RunParallel(func(pb *testing.PB) {
+		for i := 0; pb.Next(); i++ {
+			s.NewCounter(names[i%len(names)])
+		}
+	})
+}
