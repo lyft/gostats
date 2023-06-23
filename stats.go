@@ -379,16 +379,7 @@ func (s *statStore) Flush() {
 	}
 	s.mu.RUnlock()
 
-	for _, name := range s.counters.Keys() {
-		counter, ok := s.counters.Peek(name)
-		if !ok {
-			// This counter was removed between retrieving the names
-			// and finding this specific counter.
-			continue
-		}
-		s.flushCounter(name, counter)
-	}
-
+	s.counters.Range(s.flushCounter)
 	s.gauges.Range(func(key, v interface{}) bool {
 		s.sink.FlushGauge(key.(string), v.(*gauge).Value())
 		return true
