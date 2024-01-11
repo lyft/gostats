@@ -79,7 +79,7 @@ func (s *loggingSink) log(name, typ string, value float64) {
 	}
 	enc.Encode(logLine{
 		Message:   fmt.Sprintf("flushing %s", typ),
-		Level:     "info",
+		Level:     "debug",
 		Timestamp: sec,
 		Logger:    "gostats.loggingsink",
 		JSON:      kv,
