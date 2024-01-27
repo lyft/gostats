@@ -379,6 +379,45 @@ func TestPerInstanceStats(t *testing.T) {
 	})
 }
 
+func TestStatsStorePrune(t *testing.T) {
+	s := NewStore(nullSink{}, false).(*statStore)
+	tick := time.NewTicker(time.Hour) // don't flush automatically
+	defer tick.Stop()
+	go s.Start(tick)
+
+	const N = 1024
+	for i := 0; i < N; i++ {
+		id := strconv.Itoa(i)
+		s.NewCounter("counter_" + id)
+		s.NewTimer("timer_" + id)
+	}
+
+	mlen := func(m *sync.Map) int {
+		n := 0
+		m.Range(func(_, _ any) bool {
+			n++
+			return true
+		})
+		return n
+	}
+
+	for i := 0; i < unusedMetricPruneCount; i++ {
+		if n := mlen(&s.counters); n != N {
+			t.Errorf("len(s.counters) == %d; want: %d", n, N)
+		}
+		if n := mlen(&s.timers); n != N {
+			t.Errorf("len(s.timers) == %d; want: %d", n, N)
+		}
+		s.Flush()
+	}
+	if n := mlen(&s.counters); n != 0 {
+		t.Errorf("len(s.counters) == %d; want: %d", n, 0)
+	}
+	if n := mlen(&s.timers); n != 0 {
+		t.Errorf("len(s.timers) == %d; want: %d", n, 0)
+	}
+}
+
 func BenchmarkStore_MutexContention(b *testing.B) {
 	s := NewStore(nullSink{}, false)
 	t := time.NewTicker(500 * time.Microsecond) // we want flush to contend with accessing metrics
@@ -492,4 +531,49 @@ func BenchmarkStoreNewPerInstanceCounter(b *testing.B) {
 			store.NewPerInstanceCounter("name", tags)
 		}
 	})
+}
+
+func BenchmarkStoreNewCounterParallel(b *testing.B) {
+	s := NewStore(nullSink{}, false)
+	t := time.NewTicker(time.Hour) // don't flush
+	defer t.Stop()
+	go s.Start(t)
+	names := new([2048]string)
+	for i := 0; i < len(names); i++ {
+		names[i] = "counter_" + strconv.Itoa(i)
+	}
+	b.ResetTimer()
+	b.RunParallel(func(pb *testing.PB) {
+		for i := 0; pb.Next(); i++ {
+			s.NewCounter(names[i%len(names)])
+		}
+	})
+}
+
+func BenchmarkStoreFlush(b *testing.B) {
+	s := NewStore(nullSink{}, false)
+
+	var counters [2048]*counter
+	var timers [2048]*timer
+	for i := 0; i < len(counters); i++ {
+		id := strconv.Itoa(i)
+		counters[i] = s.NewCounter("counter_" + id).(*counter)
+		counters[i].Set(1)
+		timers[i] = s.NewTimer("timer_" + id).(*timer)
+	}
+	b.ResetTimer()
+
+	for i, n := 0, 0; i < b.N; i++ {
+		s.Flush()
+		// This takes ~2.5 microseconds so no point stopping the timer
+		if n++; n == unusedMetricPruneCount-1 {
+			n = 0
+			for i := 0; i < len(counters); i++ {
+				counters[i].currentValue = uint64(i)
+				counters[i].zeroCount = 0
+				timers[i].active = 1
+				timers[i].zeroCount = 0
+			}
+		}
+	}
 }

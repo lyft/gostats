@@ -10,6 +10,14 @@ import (
 	tagspkg "github.com/lyft/gostats/internal/tags"
 )
 
+// Counter and Timer metrics that were zero after unusedMetricPruneCount are
+// deleted from the statStore.
+//
+// TODO: considering a time interval for this instead of basing it off flush
+// count. This guards against aggressively short/long flush intervals, which
+// is configurable and thus out of our control.
+const unusedMetricPruneCount = 4
+
 // A Store holds statistics.
 // There are two options when creating a new store:
 //
@@ -238,6 +246,8 @@ func NewDefaultStore() Store {
 type counter struct {
 	currentValue  uint64
 	lastSentValue uint64
+	// number of times this counter had a value of zero during flush
+	zeroCount uint32
 }
 
 func (c *counter) Add(delta uint64) {
@@ -302,6 +312,12 @@ type timer struct {
 	base time.Duration
 	name string
 	sink Sink
+	// active is a boolean used to check if the timer was used between flushes
+	active uint32
+	// zeroCount is the number of times the timer was not used between
+	// flushes - if exceeds unusedMetricPruneCount the timer is deleted
+	// from the Store.
+	zeroCount uint32
 }
 
 func (t *timer) time(dur time.Duration) {
@@ -313,6 +329,7 @@ func (t *timer) AddDuration(dur time.Duration) {
 }
 
 func (t *timer) AddValue(value float64) {
+	atomic.StoreUint32(&t.active, 1)
 	t.sink.FlushTimer(t.name, value)
 }
 
@@ -369,10 +386,35 @@ func (s *statStore) Flush() {
 	}
 	s.mu.RUnlock()
 
+	// This is kinda slow and does not write to the sink so run it in a
+	// separate goroutine.
+	wg := new(sync.WaitGroup)
+	wg.Add(1)
+	go func(timers *sync.Map) {
+		defer wg.Done()
+		timers.Range(func(key, v interface{}) bool {
+			timer := v.(*timer)
+			switch {
+			case atomic.SwapUint32(&timer.active, 0) != 0:
+				atomic.StoreUint32(&timer.zeroCount, 0)
+			case atomic.AddUint32(&timer.zeroCount, 1) >= unusedMetricPruneCount:
+				timers.Delete(key)
+			}
+			return true
+		})
+	}(&s.timers)
+
 	s.counters.Range(func(key, v interface{}) bool {
+		c := v.(*counter)
+		value := c.latch()
+		switch {
 		// do not flush counters that are set to zero
-		if value := v.(*counter).latch(); value != 0 {
+		case value != 0:
 			s.sink.FlushCounter(key.(string), value)
+			atomic.StoreUint32(&c.zeroCount, 0)
+		// delete unused counters
+		case atomic.AddUint32(&c.zeroCount, 1) >= unusedMetricPruneCount:
+			s.counters.Delete(key)
 		}
 		return true
 	})
@@ -386,6 +428,10 @@ func (s *statStore) Flush() {
 	if ok {
 		flushableSink.Flush()
 	}
+
+	// Wait for the goroutine pruning timers to finish. This prevents an
+	// explosion of goroutines if someone calls Flush in a hot loop.
+	wg.Wait()
 }
 
 func (s *statStore) AddStatGenerator(statGenerator StatGenerator) {
