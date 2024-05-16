@@ -71,7 +71,6 @@ func TestStatsStartContext(_ *testing.T) {
 
 // Ensure we create a counter and increment it for reserved tags
 func TestValidateTags(t *testing.T) {
-
 	// Ensure we don't create a counter without reserved tags
 	sink := &testStatSink{}
 	store := NewStore(sink, true)
@@ -95,7 +94,6 @@ func TestValidateTags(t *testing.T) {
 	if !strings.Contains(counter, expected) {
 		t.Error("wanted counter value of test.___f=i:1|c, got", counter)
 	}
-
 }
 
 // Ensure timers and timespans are working

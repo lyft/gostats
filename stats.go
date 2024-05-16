@@ -349,7 +349,7 @@ type statStore struct {
 var ReservedTagWords = map[string]bool{"asg": true, "az": true, "backend": true, "canary": true, "host": true, "period": true, "region": true, "shard": true, "window": true, "source": true, "project": true, "facet": true, "envoyservice": true}
 
 func (s *statStore) validateTags(tags map[string]string) {
-	for k, _ := range tags {
+	for k := range tags {
 		if _, ok := ReservedTagWords[k]; ok {
 			// Keep track of how many times a reserved tag is used
 			s.NewCounter("reserved_tag").Inc()
