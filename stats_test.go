@@ -69,6 +69,35 @@ func TestStatsStartContext(_ *testing.T) {
 	wg.Wait()
 }
 
+// Ensure we create a counter and increment it for reserved tags
+func TestValidateTags(t *testing.T) {
+
+	// Ensure we don't create a counter without reserved tags
+	sink := &testStatSink{}
+	store := NewStore(sink, true)
+	store.NewCounter("test").Inc()
+	store.Flush()
+
+	expected := "test:1|c"
+	counter := sink.record
+	if !strings.Contains(counter, expected) {
+		t.Error("wanted counter value of test:1|c, got", counter)
+	}
+
+	// A reserved tag should trigger adding the reserved_tag counter
+	sink = &testStatSink{}
+	store = NewStore(sink, true)
+	store.NewCounterWithTags("test", map[string]string{"host": "i"}).Inc()
+	store.Flush()
+
+	expected = "reserved_tag:1|c\ntest.__host=i:1|c"
+	counter = sink.record
+	if !strings.Contains(counter, expected) {
+		t.Error("wanted counter value of test.___f=i:1|c, got", counter)
+	}
+
+}
+
 // Ensure timers and timespans are working
 func TestTimer(t *testing.T) {
 	testDuration := time.Duration(9800000)
