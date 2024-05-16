@@ -6,7 +6,6 @@ linters:
     - gosimple
     - govet
     - ineffassign
-    - megacheck
     - misspell
     - nakedret
     - revive

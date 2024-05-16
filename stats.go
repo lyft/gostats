@@ -346,6 +346,17 @@ type statStore struct {
 	sink Sink
 }
 
+var ReservedTagWords = map[string]bool{"asg": true, "az": true, "backend": true, "canary": true, "host": true, "period": true, "region": true, "shard": true, "window": true, "source": true, "project": true, "facet": true, "envoyservice": true}
+
+func (s *statStore) validateTags(tags map[string]string) {
+	for k := range tags {
+		if _, ok := ReservedTagWords[k]; ok {
+			// Keep track of how many times a reserved tag is used
+			s.NewCounter("reserved_tag").Inc()
+		}
+	}
+}
+
 func (s *statStore) StartContext(ctx context.Context, ticker *time.Ticker) {
 	for {
 		select {
@@ -403,6 +414,7 @@ func (s *statStore) Scope(name string) Scope {
 }
 
 func (s *statStore) ScopeWithTags(name string, tags map[string]string) Scope {
+	s.validateTags(tags)
 	return newSubScope(s, name, tags)
 }
 
@@ -422,6 +434,7 @@ func (s *statStore) NewCounter(name string) Counter {
 }
 
 func (s *statStore) NewCounterWithTags(name string, tags map[string]string) Counter {
+	s.validateTags(tags)
 	return s.newCounter(tagspkg.SerializeTags(name, tags))
 }
 
@@ -438,6 +451,7 @@ func (s *statStore) NewPerInstanceCounter(name string, tags map[string]string) C
 	if _, found := tags["_f"]; found {
 		return s.NewCounterWithTags(name, tags)
 	}
+	s.validateTags(tags)
 	return s.newCounterWithTagSet(name, tagspkg.TagSet(nil).MergePerInstanceTags(tags))
 }
 
@@ -457,6 +471,7 @@ func (s *statStore) NewGauge(name string) Gauge {
 }
 
 func (s *statStore) NewGaugeWithTags(name string, tags map[string]string) Gauge {
+	s.validateTags(tags)
 	return s.newGauge(tagspkg.SerializeTags(name, tags))
 }
 
@@ -471,6 +486,7 @@ func (s *statStore) NewPerInstanceGauge(name string, tags map[string]string) Gau
 	if _, found := tags["_f"]; found {
 		return s.NewGaugeWithTags(name, tags)
 	}
+	s.validateTags(tags)
 	return s.newGaugeWithTagSet(name, tagspkg.TagSet(nil).MergePerInstanceTags(tags))
 }
 
@@ -490,6 +506,7 @@ func (s *statStore) NewMilliTimer(name string) Timer {
 }
 
 func (s *statStore) NewMilliTimerWithTags(name string, tags map[string]string) Timer {
+	s.validateTags(tags)
 	return s.newTimer(tagspkg.SerializeTags(name, tags), time.Millisecond)
 }
 
@@ -498,6 +515,7 @@ func (s *statStore) NewTimer(name string) Timer {
 }
 
 func (s *statStore) NewTimerWithTags(name string, tags map[string]string) Timer {
+	s.validateTags(tags)
 	return s.newTimer(tagspkg.SerializeTags(name, tags), time.Microsecond)
 }
 
@@ -512,6 +530,7 @@ func (s *statStore) NewPerInstanceTimer(name string, tags map[string]string) Tim
 	if _, found := tags["_f"]; found {
 		return s.NewTimerWithTags(name, tags)
 	}
+	s.validateTags(tags)
 	return s.newTimerWithTagSet(name, tagspkg.TagSet(nil).MergePerInstanceTags(tags), time.Microsecond)
 }
 
@@ -522,6 +541,7 @@ func (s *statStore) NewPerInstanceMilliTimer(name string, tags map[string]string
 	if _, found := tags["_f"]; found {
 		return s.NewMilliTimerWithTags(name, tags)
 	}
+	s.validateTags(tags)
 	return s.newTimerWithTagSet(name, tagspkg.TagSet(nil).MergePerInstanceTags(tags), time.Millisecond)
 }
 
@@ -540,6 +560,7 @@ func (s *subScope) Scope(name string) Scope {
 }
 
 func (s *subScope) ScopeWithTags(name string, tags map[string]string) Scope {
+	s.registry.validateTags(tags)
 	return &subScope{
 		registry: s.registry,
 		name:     joinScopes(s.name, name),
@@ -599,6 +620,7 @@ func (s *subScope) NewMilliTimerWithTags(name string, tags map[string]string) Ti
 }
 
 func (s *subScope) NewPerInstanceMilliTimer(name string, tags map[string]string) Timer {
+	s.registry.validateTags(tags)
 	return s.registry.newTimerWithTagSet(joinScopes(s.name, name),
 		s.tags.MergePerInstanceTags(tags), time.Millisecond)
 }

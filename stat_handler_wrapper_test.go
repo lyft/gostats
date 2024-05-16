@@ -92,7 +92,7 @@ func TestHTTPHandler_WrapResponse(t *testing.T) {
 
 	h := NewStatHandler(
 		NewStore(NewNullSink(), false),
-		http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {})).(*httpHandler)
+		http.HandlerFunc(func(http.ResponseWriter, *http.Request) {})).(*httpHandler)
 
 	for i, test := range tests {
 		tc := test
