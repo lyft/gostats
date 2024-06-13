@@ -8,6 +8,7 @@ import (
 	"time"
 
 	tagspkg "github.com/lyft/gostats/internal/tags"
+	lru "github.com/lyft/gostats/internal/vendored/hashicorp/golang-lru"
 )
 
 // A Store holds statistics.
@@ -214,7 +215,14 @@ type StatGenerator interface {
 // NewStore returns an Empty store that flushes to Sink passed as an argument.
 // Note: the export argument is unused.
 func NewStore(sink Sink, _ bool) Store {
-	return &statStore{sink: sink}
+	s := &statStore{sink: sink}
+
+	// lru.NewWithEvict can only return a non-nil error when cacheSize < 0.
+	cacheSize := 65536
+	s.counters, _ = lru.NewWithEvict(cacheSize, s.flushCounter)
+	s.timers, _ = lru.New[string, *timer](cacheSize)
+
+	return s
 }
 
 // NewDefaultStore returns a Store with a TCP statsd sink, and a running flush timer.
@@ -336,9 +344,11 @@ func (ts *timespan) CompleteWithDuration(value time.Duration) {
 }
 
 type statStore struct {
-	counters sync.Map
-	gauges   sync.Map
-	timers   sync.Map
+	counters *lru.Cache[string, *counter]
+	timers   *lru.Cache[string, *timer]
+	// Gauges must not be expunged because they are client-side stateful.
+	// We use a sync.Map instead of a cache to ensure they are kept indefinitely.
+	gauges sync.Map
 
 	mu             sync.RWMutex
 	statGenerators []StatGenerator
@@ -380,14 +390,7 @@ func (s *statStore) Flush() {
 	}
 	s.mu.RUnlock()
 
-	s.counters.Range(func(key, v interface{}) bool {
-		// do not flush counters that are set to zero
-		if value := v.(*counter).latch(); value != 0 {
-			s.sink.FlushCounter(key.(string), value)
-		}
-		return true
-	})
-
+	s.counters.Range(s.flushCounter)
 	s.gauges.Range(func(key, v interface{}) bool {
 		s.sink.FlushGauge(key.(string), v.(*gauge).Value())
 		return true
@@ -396,6 +399,12 @@ func (s *statStore) Flush() {
 	flushableSink, ok := s.sink.(FlushableSink)
 	if ok {
 		flushableSink.Flush()
+	}
+}
+
+func (s *statStore) flushCounter(name string, counter *counter) {
+	if value := counter.latch(); value != 0 {
+		s.sink.FlushCounter(name, value)
 	}
 }
 
@@ -419,12 +428,12 @@ func (s *statStore) ScopeWithTags(name string, tags map[string]string) Scope {
 }
 
 func (s *statStore) newCounter(serializedName string) *counter {
-	if v, ok := s.counters.Load(serializedName); ok {
-		return v.(*counter)
+	if v, ok := s.counters.Get(serializedName); ok {
+		return v
 	}
 	c := new(counter)
-	if v, loaded := s.counters.LoadOrStore(serializedName, c); loaded {
-		return v.(*counter)
+	if v, ok, _ := s.counters.PeekOrAdd(serializedName, c); ok {
+		return v
 	}
 	return c
 }
@@ -491,12 +500,12 @@ func (s *statStore) NewPerInstanceGauge(name string, tags map[string]string) Gau
 }
 
 func (s *statStore) newTimer(serializedName string, base time.Duration) *timer {
-	if v, ok := s.timers.Load(serializedName); ok {
-		return v.(*timer)
+	if v, ok := s.timers.Get(serializedName); ok {
+		return v
 	}
 	t := &timer{name: serializedName, sink: s.sink, base: base}
-	if v, loaded := s.timers.LoadOrStore(serializedName, t); loaded {
-		return v.(*timer)
+	if v, ok, _ := s.timers.PeekOrAdd(serializedName, t); ok {
+		return v
 	}
 	return t
 }

@@ -200,8 +200,8 @@ func TestTagMapNotModified(t *testing.T) {
 	}
 
 	scopeGenerators := map[string]func() Scope{
-		"statStore": func() Scope { return &statStore{} },
-		"subScope":  func() Scope { return newSubScope(&statStore{}, "name", nil) },
+		"statStore": func() Scope { return NewStore(nil, false) },
+		"subScope":  func() Scope { return newSubScope(NewStore(nil, false).(*statStore), "name", nil) },
 	}
 
 	methodTestCases := map[string]TagMethod{
@@ -360,7 +360,7 @@ func TestPerInstanceStats(t *testing.T) {
 	testPerInstanceMethods := func(t *testing.T, setupScope func(Scope) Scope) {
 		for _, x := range testCases {
 			sink := mock.NewSink()
-			scope := setupScope(&statStore{sink: sink})
+			scope := setupScope(NewStore(sink, false).(*statStore))
 
 			scope.NewPerInstanceCounter("name", x.tags).Inc()
 			scope.NewPerInstanceGauge("name", x.tags).Inc()
@@ -495,7 +495,7 @@ func BenchmarkParallelCounter(b *testing.B) {
 
 func BenchmarkStoreNewPerInstanceCounter(b *testing.B) {
 	b.Run("HasTag", func(b *testing.B) {
-		var store statStore
+		store := NewStore(nil, false)
 		tags := map[string]string{
 			"1":  "1",
 			"2":  "2",
@@ -508,7 +508,7 @@ func BenchmarkStoreNewPerInstanceCounter(b *testing.B) {
 	})
 
 	b.Run("MissingTag", func(b *testing.B) {
-		var store statStore
+		store := NewStore(nil, false)
 		tags := map[string]string{
 			"1": "1",
 			"2": "2",
@@ -517,6 +517,23 @@ func BenchmarkStoreNewPerInstanceCounter(b *testing.B) {
 		}
 		for i := 0; i < b.N; i++ {
 			store.NewPerInstanceCounter("name", tags)
+		}
+	})
+}
+
+func BenchmarkStoreNewCounterParallel(b *testing.B) {
+	s := NewStore(nullSink{}, false)
+	t := time.NewTicker(time.Hour) // don't flush
+	defer t.Stop()
+	go s.Start(t)
+	names := new([2048]string)
+	for i := 0; i < len(names); i++ {
+		names[i] = "counter_" + strconv.Itoa(i)
+	}
+	b.ResetTimer()
+	b.RunParallel(func(pb *testing.PB) {
+		for i := 0; pb.Next(); i++ {
+			s.NewCounter(names[i%len(names)])
 		}
 	})
 }
