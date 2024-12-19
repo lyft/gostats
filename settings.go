@@ -105,7 +105,7 @@ func GetSettings() Settings {
 	if err != nil {
 		panic(err)
 	}
-	delayedFlush, err := envInt("GOSTATS_DELAYED_FLUSH", DefaultDelayedFlush)
+	delayedFlush, err := envBool("GOSTATS_DELAYED_FLUSH", DefaultDelayedFlush)
 	if err != nil {
 		panic(err)
 	}

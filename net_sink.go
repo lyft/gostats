@@ -315,6 +315,7 @@ func (s *netSink) run() {
 			// Drop through in case retryc has nothing.
 		}
 
+		// if the channel is at capacity, it's blocking, let's signal for it to be flushed and unblock
 		if len(s.outc) == cap(s.outc) {
 			s.Flush()
 		}
@@ -340,9 +341,16 @@ func (s *netSink) run() {
 		case <-t.C:
 			s.flush()
 		case buf := <-s.outc:
-			// naturally we will write anytime ve data here. since timers are actively/adhoc written to outc there is no batching or flush control (gauages and counters only write data to outc at a cadence of GOSTATS_FLUSH_INTERVAL_SECONDS)
-			// by skipping this we move ourselves to just relying on doFlush which is also controlled by the GOSTATS_FLUSH_INTERVAL_SECONDS ticker
-			// maybe delaying gauges and counters writes by a second, but importantly implying timer writes at an interval, not just whenever
+			// Normally we will write anytime outc has data
+			//
+			// Gauages and Counters are written to outc at a cadence of GOSTATS_FLUSH_INTERVAL_SECONDS
+			// Timers are written adhoc to outc
+			//
+			// With delayedFlush we will rely on doFlush which is also controlled by the GOSTATS_FLUSH_INTERVAL_SECONDS
+			//
+			// Side effects:
+			// * Delayed Gauge and Counter writes by batching these at the end of the interval
+			// * Implied Timer batching and writing under the flush interval
 			if delayedFlush {
 				continue
 			}

@@ -313,7 +313,7 @@ func (t *timer) AddDuration(dur time.Duration) {
 }
 
 func (t *timer) AddValue(value float64) {
-	t.sink.FlushTimer(t.name, value) // writes the timer to buffer channel and send immediately unless DELAY_FLUSH is set
+	t.sink.FlushTimer(t.name, value) // writes the timer to a buffered channel which will send immediately unless GOSTATS_DELAYED_FLUSH is set
 }
 
 func (t *timer) AllocateSpan() Timespan {
@@ -384,19 +384,19 @@ func (s *statStore) Flush() {
 	s.counters.Range(func(key, v interface{}) bool {
 		// do not flush counters that are set to zero
 		if value := v.(*counter).latch(); value != 0 {
-			s.sink.FlushCounter(key.(string), value) // writes the counter to buffer channel which will send immediately unless DELAY_FLUSH is set
+			s.sink.FlushCounter(key.(string), value) // writes the counter to a buffered channel which will be sent either right away or at the end of the stack depending on GOSTATS_DELAYED_FLUSH
 		}
 		return true
 	})
 
 	s.gauges.Range(func(key, v interface{}) bool {
-		s.sink.FlushGauge(key.(string), v.(*gauge).Value()) // writes the gauage to buffer channel which will send immediately unless DELAY_FLUSH is set
+		s.sink.FlushGauge(key.(string), v.(*gauge).Value()) // writes the gauage to a buffered channel which will be sent either right away or at the end of the stack depending on GOSTATS_DELAYED_FLUSH
 		return true
 	})
 
 	flushableSink, ok := s.sink.(FlushableSink)
 	if ok {
-		flushableSink.Flush() // signal counters, gauges and timers (i.e. buffer channel to be drained) to be sent if not sent immediately
+		flushableSink.Flush() // signal the buffered channel (buffered counters, gauges and timers) to be drained and sent if there is anythig to send
 	}
 }
 
