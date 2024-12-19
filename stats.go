@@ -313,7 +313,7 @@ func (t *timer) AddDuration(dur time.Duration) {
 }
 
 func (t *timer) AddValue(value float64) {
-	t.sink.FlushTimer(t.name, value)
+	t.sink.FlushTimer(t.name, value) // writes the timer to buffer channel and send immediately unless DELAY_FLUSH is set
 }
 
 func (t *timer) AllocateSpan() Timespan {
@@ -357,6 +357,7 @@ func (s *statStore) validateTags(tags map[string]string) {
 	}
 }
 
+// flush loop based on specified ticker
 func (s *statStore) StartContext(ctx context.Context, ticker *time.Ticker) {
 	for {
 		select {
@@ -383,19 +384,19 @@ func (s *statStore) Flush() {
 	s.counters.Range(func(key, v interface{}) bool {
 		// do not flush counters that are set to zero
 		if value := v.(*counter).latch(); value != 0 {
-			s.sink.FlushCounter(key.(string), value)
+			s.sink.FlushCounter(key.(string), value) // writes the counter to buffer channel which will send immediately unless DELAY_FLUSH is set
 		}
 		return true
 	})
 
 	s.gauges.Range(func(key, v interface{}) bool {
-		s.sink.FlushGauge(key.(string), v.(*gauge).Value())
+		s.sink.FlushGauge(key.(string), v.(*gauge).Value()) // writes the gauage to buffer channel which will send immediately unless DELAY_FLUSH is set
 		return true
 	})
 
 	flushableSink, ok := s.sink.(FlushableSink)
 	if ok {
-		flushableSink.Flush()
+		flushableSink.Flush() // signal counters, gauges and timers (i.e. buffer channel to be drained) to be sent if not sent immediately
 	}
 }
 

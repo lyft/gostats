@@ -274,11 +274,14 @@ func (s *netSink) FlushTimer(name string, value float64) {
 
 func (s *netSink) run() {
 	addr := net.JoinHostPort(s.conf.StatsdHost, strconv.Itoa(s.conf.StatsdPort))
+	delayedFlush := GetSettings().DelayedFlush
 
 	var reconnectFailed bool // true if last reconnect failed
 
 	t := time.NewTicker(flushInterval)
 	defer t.Stop()
+
+	// metric write loop (actively draining content of outc channel)
 	for {
 		if s.conn == nil {
 			if err := s.connect(addr); err != nil {
@@ -312,9 +315,11 @@ func (s *netSink) run() {
 			// Drop through in case retryc has nothing.
 		}
 
+		if len(s.outc) == cap(s.outc) {
+			s.Flush()
+		}
+
 		select {
-		case <-t.C:
-			s.flush()
 		case done := <-s.doFlush:
 			// Only flush pending buffers, this prevents an issue where
 			// continuous writes prevent the flush loop from exiting.
@@ -332,7 +337,15 @@ func (s *netSink) run() {
 				putBuffer(buf)
 			}
 			close(done)
+		case <-t.C:
+			s.flush()
 		case buf := <-s.outc:
+			// naturally we will write anytime ve data here. since timers are actively/adhoc written to outc there is no batching or flush control (gauages and counters only write data to outc at a cadence of GOSTATS_FLUSH_INTERVAL_SECONDS)
+			// by skipping this we move ourselves to just relying on doFlush which is also controlled by the GOSTATS_FLUSH_INTERVAL_SECONDS ticker
+			// maybe delaying gauges and counters writes by a second, but importantly implying timer writes at an interval, not just whenever
+			if delayedFlush {
+				continue
+			}
 			if err := s.writeToConn(buf); err != nil {
 				s.retryc <- buf
 				continue

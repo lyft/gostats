@@ -20,6 +20,8 @@ const (
 	DefaultFlushIntervalS = 5
 	// DefaultLoggingSinkDisabled is the default behavior of logging sink suppression, default is false.
 	DefaultLoggingSinkDisabled = false
+	// DefaultDelayedFlush defines if we want to force batching by default
+	DefaultDelayedFlush = false
 )
 
 // The Settings type is used to configure gostats. gostats uses environment
@@ -38,6 +40,8 @@ type Settings struct {
 	// Disable the LoggingSink when USE_STATSD is false and use the NullSink instead.
 	// This will cause all stats to be silently dropped.
 	LoggingSinkDisabled bool `envconfig:"GOSTATS_LOGGING_SINK_DISABLED" default:"false"`
+	// Force batching under FlushIntervalS for all metrics
+	DelayedFlush bool `envconfig:"GOSTATS_DELAYED_FLUSH" default:"false"`
 }
 
 // An envError is an error that occurred parsing an environment variable
@@ -101,6 +105,10 @@ func GetSettings() Settings {
 	if err != nil {
 		panic(err)
 	}
+	delayedFlush, err := envInt("GOSTATS_DELAYED_FLUSH", DefaultDelayedFlush)
+	if err != nil {
+		panic(err)
+	}
 	return Settings{
 		UseStatsd:           useStatsd,
 		StatsdHost:          envOr("STATSD_HOST", DefaultStatsdHost),
@@ -108,6 +116,7 @@ func GetSettings() Settings {
 		StatsdPort:          statsdPort,
 		FlushIntervalS:      flushIntervalS,
 		LoggingSinkDisabled: loggingSinkDisabled,
+		DelayedFlush:        delayedFlush,
 	}
 }
 
