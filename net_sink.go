@@ -274,7 +274,7 @@ func (s *netSink) FlushTimer(name string, value float64) {
 
 func (s *netSink) run() {
 	addr := net.JoinHostPort(s.conf.StatsdHost, strconv.Itoa(s.conf.StatsdPort))
-	delayedFlush := GetSettings().DelayedFlush
+	batch := GetSettings().ForcedBatching
 
 	var reconnectFailed bool // true if last reconnect failed
 
@@ -346,12 +346,12 @@ func (s *netSink) run() {
 			// Gauages and Counters are written to outc at a cadence of GOSTATS_FLUSH_INTERVAL_SECONDS
 			// Timers are written adhoc to outc
 			//
-			// With delayedFlush we will rely on doFlush which is also controlled by the GOSTATS_FLUSH_INTERVAL_SECONDS
+			// With batch we will rely on doFlush which is also controlled by the GOSTATS_FLUSH_INTERVAL_SECONDS
 			//
 			// Side effects:
 			// * Delayed Gauge and Counter writes by batching these at the end of the interval
 			// * Implied Timer batching and writing under the flush interval
-			if delayedFlush {
+			if batch {
 				continue
 			}
 			if err := s.writeToConn(buf); err != nil {
