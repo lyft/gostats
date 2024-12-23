@@ -355,7 +355,7 @@ func (s *netSink) run() {
 			}
 			putBuffer(buf) // todo understand: we write the stats buffer we have successfully sent to a pool, but anytime we access data from that pool, we clear it and reuse the allocation for the next stat
 		case <-t.C:
-			// todo find out what happens if this channel is full
+			// todo understand: if the outc channel is full this will block? but it won't ever since it's the last select
 			s.flush() // from a higher level, stats write to s.bufWriter at GOSTATS_FLUSH_INTERVAL_SECONDS (or adhoc for Timers). this flushes them to outc every t.C tick
 		}
 	}
