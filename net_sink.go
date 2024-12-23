@@ -274,11 +274,11 @@ func (s *netSink) FlushTimer(name string, value float64) {
 
 func (s *netSink) run() {
 	addr := net.JoinHostPort(s.conf.StatsdHost, strconv.Itoa(s.conf.StatsdPort))
-	batch := GetSettings().ForcedBatching
-
-	batchc := make(chan *bytes.Buffer, cap(s.outc))
 
 	var reconnectFailed bool // true if last reconnect failed
+
+	batch := GetSettings().ForcedBatching
+	batches := make([]bytes.Buffer, 0, cap(s.outc)*4) // todo parameterize
 
 	t := time.NewTicker(flushInterval)
 	defer t.Stop()
@@ -317,26 +317,23 @@ func (s *netSink) run() {
 			// Drop through in case retryc has nothing.
 		}
 
-		// if the channel is at capacity, it's blocking, let's signal for it to be flushed and unblock
-		if len(s.outc) == cap(s.outc) {
-			s.Flush()
+		if len(batches) == cap(batches) {
+			s.doFlush <- make(chan struct{}) // todo in other writes to doFlush we block until the channel is closed, but since we're calling it from the same go routine we won't . it'll be better to factor to not rely on teh channel for all writes
 		}
 
 		select {
 		case done := <-s.doFlush:
-			n := len(batchc)
+			n := len(batches)
 			for i := 0; i < n && s.conn != nil; i++ {
-				buf := <-batchc
-				if err := s.writeToConn(buf); err != nil {
-					s.retryc <- buf
+				buf := batches[i]
+				if err := s.writeToConn(&buf); err != nil {
+					s.retryc <- &buf
 					continue
 				}
-				putBuffer(buf) // todo understand: we write the stats buffer we have successfully sent to a pool, but anytime we access data from that pool, we clear it and reuse the allocation for the next stat
+				putBuffer(&buf) // todo understand: we write the stats buffer we have successfully sent to a pool, but anytime we access data from that pool, we clear it and reuse the allocation for the next stat
 			}
-
+			batches = batches[:0]
 			close(done)
-		case <-t.C:
-			s.flush()
 		case buf := <-s.outc:
 			// Normally we will send stats anytime outc has data
 			//
@@ -349,7 +346,7 @@ func (s *netSink) run() {
 			// * Implied Timer batching under the flush interval
 			// * ~1 second delay to Gauge and Counter writes by batching these writes to the next internval
 			if batch {
-				batchc <- buf
+				batches = append(batches, *buf)
 				continue
 			}
 			if err := s.writeToConn(buf); err != nil {
@@ -357,6 +354,9 @@ func (s *netSink) run() {
 				continue
 			}
 			putBuffer(buf) // todo understand: we write the stats buffer we have successfully sent to a pool, but anytime we access data from that pool, we clear it and reuse the allocation for the next stat
+		case <-t.C:
+			// todo find out what happens if this channel is full
+			s.flush() // from a higher level, stats write to s.bufWriter at GOSTATS_FLUSH_INTERVAL_SECONDS (or adhoc for Timers). this flushes them to outc every t.C tick
 		}
 	}
 }
