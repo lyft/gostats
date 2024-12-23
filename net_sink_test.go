@@ -864,7 +864,7 @@ func TestFlushTimerNoBatching(t *testing.T) {
 	sink.FlushTimer("timer_int", 1)
 	sink.FlushTimer("timer_float", 1.23)
 
-	time.Sleep(time.Second * 5)
+	time.Sleep(2001 * time.Millisecond)
 
 	exp := strings.Join(expected[:], "")
 	buf := ts.String()
@@ -891,14 +891,14 @@ func TestFlushTimerBatching(t *testing.T) {
 
 	sink.FlushTimer("timer_int", 1)
 	sink.FlushTimer("timer_float", 1.23)
-	time.Sleep(time.Second * 5)
+	time.Sleep(2001 * time.Millisecond)
 
 	if ts.String() != "" {
 		t.Errorf("Stats were written despite forced batching")
 	}
 
 	sink.Flush()
-	time.Sleep(time.Second * 5)
+	time.Sleep(2001 * time.Millisecond)
 
 	exp := strings.Join(expected[:], "")
 	buf := ts.String()

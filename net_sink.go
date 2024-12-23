@@ -311,7 +311,7 @@ func (s *netSink) run() {
 				s.handleFlushErrorSize(err, buf.Len())
 				s.mu.Unlock()
 			}
-			putBuffer(buf)
+			putBuffer(buf) // todo understand: we write the stats buffer we have successfully sent to a pool, but anytime we access data from that pool, we clear it and reuse the allocation for the next stat
 			continue
 		default:
 			// Drop through in case retryc has nothing.
@@ -331,7 +331,7 @@ func (s *netSink) run() {
 					s.retryc <- buf
 					continue
 				}
-				putBuffer(buf)
+				putBuffer(buf) // todo understand: we write the stats buffer we have successfully sent to a pool, but anytime we access data from that pool, we clear it and reuse the allocation for the next stat
 			}
 
 			close(done)
@@ -347,7 +347,7 @@ func (s *netSink) run() {
 			//
 			// Side effects:
 			// * Implied Timer batching under the flush interval
-			// * < 1 second delay to Gauge and Counter writes by batching these at the end of the interval
+			// * ~1 second delay to Gauge and Counter writes by batching these writes to the next internval
 			if batch {
 				batchc <- buf
 				continue
@@ -356,7 +356,7 @@ func (s *netSink) run() {
 				s.retryc <- buf
 				continue
 			}
-			putBuffer(buf)
+			putBuffer(buf) // todo understand: we write the stats buffer we have successfully sent to a pool, but anytime we access data from that pool, we clear it and reuse the allocation for the next stat
 		}
 	}
 }
