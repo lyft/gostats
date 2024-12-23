@@ -276,6 +276,8 @@ func (s *netSink) run() {
 	addr := net.JoinHostPort(s.conf.StatsdHost, strconv.Itoa(s.conf.StatsdPort))
 	batch := GetSettings().ForcedBatching
 
+	batchc := make(chan *bytes.Buffer, cap(s.outc))
+
 	var reconnectFailed bool // true if last reconnect failed
 
 	t := time.NewTicker(flushInterval)
@@ -322,26 +324,21 @@ func (s *netSink) run() {
 
 		select {
 		case done := <-s.doFlush:
-			// Only flush pending buffers, this prevents an issue where
-			// continuous writes prevent the flush loop from exiting.
-			//
-			// If there is an error writeToConn() will set the conn to
-			// nil thus breaking the loop.
-			//
-			n := len(s.outc)
+			n := len(batchc)
 			for i := 0; i < n && s.conn != nil; i++ {
-				buf := <-s.outc
+				buf := <-batchc
 				if err := s.writeToConn(buf); err != nil {
 					s.retryc <- buf
 					continue
 				}
 				putBuffer(buf)
 			}
+
 			close(done)
 		case <-t.C:
 			s.flush()
 		case buf := <-s.outc:
-			// Normally we will write anytime outc has data
+			// Normally we will send stats anytime outc has data
 			//
 			// Gauages and Counters are written to outc at a cadence of GOSTATS_FLUSH_INTERVAL_SECONDS
 			// Timers are written adhoc to outc
@@ -349,9 +346,10 @@ func (s *netSink) run() {
 			// With batch we will rely on doFlush which is also controlled by the GOSTATS_FLUSH_INTERVAL_SECONDS
 			//
 			// Side effects:
-			// * Delayed Gauge and Counter writes by batching these at the end of the interval
-			// * Implied Timer batching and writing under the flush interval
+			// * Implied Timer batching under the flush interval
+			// * < 1 second delay to Gauge and Counter writes by batching these at the end of the interval
 			if batch {
+				batchc <- buf
 				continue
 			}
 			if err := s.writeToConn(buf); err != nil {
