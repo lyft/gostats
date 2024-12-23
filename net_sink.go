@@ -318,7 +318,7 @@ func (s *netSink) run() {
 		}
 
 		if len(batches) == cap(batches) {
-			s.doFlush <- make(chan struct{}) // todo in other writes to doFlush we block until the channel is closed, but since we're calling it from the same go routine we won't . it'll be better to factor to not rely on teh channel for all writes
+			s.doFlush <- make(chan struct{}) // todo in other writes to doFlush we block until the channel is closed, but since we're calling it from the same go routine we won't . it'll be better to factor to not rely on the channel for all writes
 		}
 
 		select {
