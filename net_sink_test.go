@@ -848,7 +848,7 @@ func testNetSinkIntegration(t *testing.T, protocol string) {
 }
 
 func TestFlushTimerNoBatching(t *testing.T) {
-	err := os.Setenv("GOSTATS_FORCED_BATCHING", "false")
+	err := os.Setenv("GOSTATS_BATCH_SIZE", "0")
 	if err != nil {
 		t.Fatalf("Failed to set environment variable: %s", err)
 	}
@@ -858,7 +858,7 @@ func TestFlushTimerNoBatching(t *testing.T) {
 		"timer_float:1.230000|ms\n",
 	}
 
-	ts, sink := setupTestNetSink(t, "tcp", false) // the protocol is arbitrary and unimportant for batching
+	ts, sink := setupTestNetSink(t, "tcp", false)
 	defer ts.Close()
 
 	sink.FlushTimer("timer_int", 1)
@@ -872,11 +872,11 @@ func TestFlushTimerNoBatching(t *testing.T) {
 		t.Errorf("Not all stats were written\ngot:\n%q\nwant:\n%q\n", buf, exp)
 	}
 
-	os.Unsetenv("GOSTATS_FORCED_BATCHING")
+	os.Unsetenv("GOSTATS_BATCH_SIZE")
 }
 
-func TestFlushTimerBatching(t *testing.T) {
-	err := os.Setenv("GOSTATS_FORCED_BATCHING", "true")
+func TestFlushTimerBatchingForTCP(t *testing.T) {
+	err := os.Setenv("GOSTATS_BATCH_SIZE", "64")
 	if err != nil {
 		t.Fatalf("Failed to set environment variable: %s", err)
 	}
@@ -886,7 +886,7 @@ func TestFlushTimerBatching(t *testing.T) {
 		"timer_float:1.230000|ms\n",
 	}
 
-	ts, sink := setupTestNetSink(t, "tcp", false) // the protocol is arbitrary and unimportant for batching
+	ts, sink := setupTestNetSink(t, "tcp", false)
 	defer ts.Close()
 
 	sink.FlushTimer("timer_int", 1)
@@ -906,7 +906,41 @@ func TestFlushTimerBatching(t *testing.T) {
 		t.Errorf("Not all stats were written\ngot:\n%q\nwant:\n%q\n", buf, exp)
 	}
 
-	os.Unsetenv("GOSTATS_FORCED_BATCHING")
+	os.Unsetenv("GOSTATS_BATCH_SIZE")
+}
+
+func TestFlushTimerBatchingForUDP(t *testing.T) {
+	err := os.Setenv("GOSTATS_BATCH_SIZE", "2928")
+	if err != nil {
+		t.Fatalf("Failed to set environment variable: %s", err)
+	}
+
+	expected := [...]string{
+		"timer_int:1|ms\n",
+		"timer_float:1.230000|ms\n",
+	}
+
+	ts, sink := setupTestNetSink(t, "udp", false)
+	defer ts.Close()
+
+	sink.FlushTimer("timer_int", 1)
+	sink.FlushTimer("timer_float", 1.23)
+	time.Sleep(2001 * time.Millisecond)
+
+	if ts.String() != "" {
+		t.Errorf("Stats were written despite forced batching")
+	}
+
+	sink.Flush()
+	time.Sleep(2001 * time.Millisecond)
+
+	exp := strings.Join(expected[:], "")
+	buf := ts.String()
+	if buf != exp {
+		t.Errorf("Not all stats were written\ngot:\n%q\nwant:\n%q\n", buf, exp)
+	}
+
+	os.Unsetenv("GOSTATS_BATCH_SIZE")
 }
 
 func TestNetSink_Integration_TCP(t *testing.T) {

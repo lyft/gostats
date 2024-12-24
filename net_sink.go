@@ -118,7 +118,7 @@ func NewNetSink(opts ...SinkOption) FlushableSink {
 		bufSize = defaultBufferSizeTCP
 	}
 
-	s.outc = make(chan *bytes.Buffer, approxMaxMemBytes/bufSize) // todo: need to understand why/how this number was chosen and probably elevate it
+	s.outc = make(chan *bytes.Buffer, approxMaxMemBytes/bufSize) // todo: this computes to a buffer of 2928 for udp and 64 for tcp do we need to influence batch size based on this?
 	s.retryc = make(chan *bytes.Buffer, 1)                       // It should be okay to limit this given we preferentially process from this over outc.
 
 	writer := &sinkWriter{outc: s.outc}
@@ -157,11 +157,12 @@ func (w *sinkWriter) Write(p []byte) (int, error) {
 }
 
 func (s *netSink) Flush() {
+	// flushed buffer to outc which will write immediately
 	if s.flush() != nil {
 		return // nothing we can do
 	}
 	ch := make(chan struct{})
-	s.doFlush <- ch
+	s.doFlush <- ch // send batches
 	<-ch
 }
 
@@ -277,13 +278,14 @@ func (s *netSink) run() {
 
 	var reconnectFailed bool // true if last reconnect failed
 
-	batch := GetSettings().ForcedBatching
-	batches := make([]bytes.Buffer, 0, cap(s.outc)*4) // todo parameterize
+	batchSize := GetSettings().BatchSize
+	isBatchEnabled := batchSize > 0
+	batch := make([]bytes.Buffer, 0, batchSize) // todo do we need to worry about cap(s.outc)? it's a buffered channel but the read is one at a time anyway
 
 	t := time.NewTicker(flushInterval)
 	defer t.Stop()
 
-	// metric write loop (actively draining content of outc channel)
+	// stat flush and write loop
 	for {
 		if s.conn == nil {
 			if err := s.connect(addr); err != nil {
@@ -311,54 +313,57 @@ func (s *netSink) run() {
 				s.handleFlushErrorSize(err, buf.Len())
 				s.mu.Unlock()
 			}
-			putBuffer(buf) // todo understand: we write the stats buffer we have successfully sent to a pool, but anytime we access data from that pool, we clear it and reuse the allocation for the next stat
+			putBuffer(buf)
 			continue
 		default:
 			// Drop through in case retryc has nothing.
 		}
 
-		if len(batches) == cap(batches) {
-			s.doFlush <- make(chan struct{}) // todo in other writes to doFlush we block until the channel is closed, but since we're calling it from the same go routine we won't . it'll be better to factor to not rely on the channel for all writes
+		// send batch if full
+		if len(batch) == cap(batch) {
+			batch = s.sendBatch(batch)
 		}
 
+		// flush to outc and batch and/or send outc
 		select {
 		case done := <-s.doFlush:
-			n := len(batches)
-			for i := 0; i < n && s.conn != nil; i++ {
-				buf := batches[i]
-				if err := s.writeToConn(&buf); err != nil {
-					s.retryc <- &buf
-					continue
-				}
-				putBuffer(&buf) // todo understand: we write the stats buffer we have successfully sent to a pool, but anytime we access data from that pool, we clear it and reuse the allocation for the next stat
-			}
-			batches = batches[:0]
+			// send batch on doFlush signal
+			batch = s.sendBatch(batch)
 			close(done)
 		case buf := <-s.outc:
-			// Normally we will send stats anytime outc has data
-			//
-			// Gauages and Counters are written to outc at a cadence of GOSTATS_FLUSH_INTERVAL_SECONDS
-			// Timers are written adhoc to outc
-			//
-			// With batch we will rely on doFlush which is also controlled by the GOSTATS_FLUSH_INTERVAL_SECONDS
-			//
-			// Side effects:
-			// * Implied Timer batching under the flush interval
-			// * ~1 second delay to Gauge and Counter writes by batching these writes to the next internval
-			if batch {
-				batches = append(batches, *buf)
+			if isBatchEnabled {
+				// Batch outc data rely on doFlush signal to send
+				batch = append(batch, *buf)
 				continue
 			}
-			if err := s.writeToConn(buf); err != nil {
-				s.retryc <- buf
-				continue
+			// Without batching we will send stats if outc has data
+			if err := s.send(buf); err == nil {
+				putBuffer(buf)
 			}
-			putBuffer(buf) // todo understand: we write the stats buffer we have successfully sent to a pool, but anytime we access data from that pool, we clear it and reuse the allocation for the next stat
 		case <-t.C:
-			// todo understand: if the outc channel is full this will block? but it won't ever since it's the last select
 			s.flush() // from a higher level, stats write to s.bufWriter at GOSTATS_FLUSH_INTERVAL_SECONDS (or adhoc for Timers). this flushes them to outc every t.C tick
 		}
 	}
+}
+
+func (s *netSink) send(buf *bytes.Buffer) error {
+	if err := s.writeToConn(buf); err != nil {
+		s.retryc <- buf
+		return err
+	}
+	return nil
+}
+
+func (s *netSink) sendBatch(batch []bytes.Buffer) []bytes.Buffer {
+	n := len(batch)
+	for i := 0; i < n && s.conn != nil; i++ {
+		buf := batch[i]
+		// todo can we just send all the batches in one call?
+		if err := s.send(&buf); err == nil {
+			putBuffer(&buf)
+		}
+	}
+	return batch[:0]
 }
 
 // writeToConn writes the buffer to the underlying conn.  May only be called
