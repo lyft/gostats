@@ -118,7 +118,7 @@ func NewNetSink(opts ...SinkOption) FlushableSink {
 		bufSize = defaultBufferSizeTCP
 	}
 
-	s.outc = make(chan *bytes.Buffer, approxMaxMemBytes/bufSize) // todo: this computes to a buffer of 2928 for udp and 64 for tcp do we need to influence batch size based on this?
+	s.outc = make(chan *bytes.Buffer, approxMaxMemBytes/bufSize) // todo: this creates a channel with a buffer of 2928 for udp and 64 for tcp do we need to influence batch size based on this?
 	s.retryc = make(chan *bytes.Buffer, 1)                       // It should be okay to limit this given we preferentially process from this over outc.
 
 	writer := &sinkWriter{outc: s.outc}
@@ -157,12 +157,12 @@ func (w *sinkWriter) Write(p []byte) (int, error) {
 }
 
 func (s *netSink) Flush() {
-	// flushed buffer to outc which will write immediately
+	// forcefully flush the buffer to outc which will send immediately if batching is disabled
 	if s.flush() != nil {
 		return // nothing we can do
 	}
 	ch := make(chan struct{})
-	s.doFlush <- ch // send batches
+	s.doFlush <- ch // send collected outc batches
 	<-ch
 }
 
@@ -319,7 +319,7 @@ func (s *netSink) run() {
 			// Drop through in case retryc has nothing.
 		}
 
-		// send batch if full
+		// send batched outc data anytime we're full and can't batch anymore
 		if len(batch) == cap(batch) {
 			batch = s.sendBatch(batch)
 		}
@@ -327,21 +327,21 @@ func (s *netSink) run() {
 		// flush to outc and batch and/or send outc
 		select {
 		case done := <-s.doFlush:
-			// send batch on doFlush signal
+			// send batched outc data
 			batch = s.sendBatch(batch)
 			close(done)
 		case buf := <-s.outc:
 			if isBatchEnabled {
-				// Batch outc data rely on doFlush signal to send
+				// batch outc data and rely on the doFlush or max capacity to send
 				batch = append(batch, *buf)
 				continue
 			}
-			// Without batching we will send stats if outc has data
+			// send outc data immediately
 			if err := s.send(buf); err == nil {
 				putBuffer(buf)
 			}
 		case <-t.C:
-			s.flush() // from a higher level, stats write to s.bufWriter at GOSTATS_FLUSH_INTERVAL_SECONDS (or adhoc for Timers). this flushes them to outc every t.C tick
+			s.flush() // from a higher level, stats are written to s.bufWriter.buf at GOSTATS_FLUSH_INTERVAL_SECONDS (or adhoc for Timers). this flushes them to outc every t.C tick
 		}
 	}
 }

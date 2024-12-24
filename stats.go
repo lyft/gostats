@@ -313,7 +313,7 @@ func (t *timer) AddDuration(dur time.Duration) {
 }
 
 func (t *timer) AddValue(value float64) {
-	t.sink.FlushTimer(t.name, value) // writes the timer value to the buffer which will be flushed to outc every second, will be sent immediately when flushed to outc is batching is not enabeld
+	t.sink.FlushTimer(t.name, value) // writes the timer value to a buffer which will be flushed to outc at an interval, will be sent immediately when flushed to outc if batching is not enabeld
 }
 
 func (t *timer) AllocateSpan() Timespan {
@@ -357,7 +357,7 @@ func (s *statStore) validateTags(tags map[string]string) {
 	}
 }
 
-// stat buffer and flush loop based on specified ticker
+// stat buffer and flush loop based on the specified ticker
 func (s *statStore) StartContext(ctx context.Context, ticker *time.Ticker) {
 	for {
 		select {
@@ -384,19 +384,19 @@ func (s *statStore) Flush() {
 	s.counters.Range(func(key, v interface{}) bool {
 		// do not flush counters that are set to zero
 		if value := v.(*counter).latch(); value != 0 {
-			s.sink.FlushCounter(key.(string), value) // writes counters to buffer which will be flushed to both outc every second and at the end of this stack
+			s.sink.FlushCounter(key.(string), value) // writes counters to a buffer which will be flushed to outc both at an interval and at the end of this stack
 		}
 		return true
 	})
 
 	s.gauges.Range(func(key, v interface{}) bool {
-		s.sink.FlushGauge(key.(string), v.(*gauge).Value()) // writes gauages to buffer which will be flushed to outc both every second and at the end of this stack
+		s.sink.FlushGauge(key.(string), v.(*gauge).Value()) // writes gauages to a buffer which will be flushed to outc both at an interval and at the end of this stack
 		return true
 	})
 
 	flushableSink, ok := s.sink.(FlushableSink)
 	if ok {
-		flushableSink.Flush() // flushes buffer to outc which directly writes if batching is disabled and signals doFlush to send outc data if batching is enabaled
+		flushableSink.Flush() // flushes buffer to outc which sends immediately if batching is disabled, also signals doFlush to send batched outc data if batching is enabaled
 	}
 }
 

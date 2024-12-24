@@ -20,7 +20,7 @@ const (
 	DefaultFlushIntervalS = 5
 	// DefaultLoggingSinkDisabled is the default behavior of logging sink suppression, default is false.
 	DefaultLoggingSinkDisabled = false
-	// DefaultBatchSize implies if batching is enabled by default and the amount to batch
+	// DefaultBatchSize is the default maximum amount of stats we batch before sending, default is 0 which disables batching.
 	DefaultBatchSize = 0
 )
 
@@ -40,7 +40,7 @@ type Settings struct {
 	// Disable the LoggingSink when USE_STATSD is false and use the NullSink instead.
 	// This will cause all stats to be silently dropped.
 	LoggingSinkDisabled bool `envconfig:"GOSTATS_LOGGING_SINK_DISABLED" default:"false"`
-	// Amount of stats to batch before sending. 0 is disabled.
+	// Max stats we batch before sending. 0 is disabled.
 	BatchSize int `envconfig:"GOSTATS_BATCH_SIZE" default:"0"`
 }
 
