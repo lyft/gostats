@@ -119,7 +119,7 @@ func NewNetSink(opts ...SinkOption) FlushableSink {
 	}
 
 	s.outc = make(chan *bytes.Buffer, approxMaxMemBytes/bufSize) // todo: this creates a channel with a buffer of 2928 for udp and 64 for tcp do we need to influence batch size based on this?
-	s.retryc = make(chan *bytes.Buffer, 1)                       // It should be okay to limit this given we preferentially process from this over outc.
+	s.retryc = make(chan *bytes.Buffer, 1)                       // It should be okay to limit this given once we write to the retry channel we break the connection, and in subsequent processing we preferentially process from this over outc.
 
 	writer := &sinkWriter{outc: s.outc}
 	s.bufWriter = bufio.NewWriterSize(writer, bufSize)
@@ -280,7 +280,8 @@ func (s *netSink) run() {
 
 	batchSize := GetSettings().BatchSize
 	isBatchEnabled := batchSize > 0
-	batch := make([]bytes.Buffer, 0, batchSize) // todo do we need to worry about cap(s.outc)? it's a buffered channel but the write to batch, is one at a time anyway
+	batch := make([]bytes.Buffer, 0, batchSize)
+	sendBatch := false
 
 	t := time.NewTicker(flushInterval)
 	defer t.Stop()
@@ -306,7 +307,7 @@ func (s *netSink) run() {
 			reconnectFailed = false
 		}
 
-		// Handle buffers that need to be retried first, if they exist.
+		// Drain all retries first
 		select {
 		case buf := <-s.retryc:
 			if err := s.writeToConn(buf); err != nil {
@@ -315,14 +316,20 @@ func (s *netSink) run() {
 				s.mu.Unlock()
 			}
 			putBuffer(buf)
-			continue
+			continue // incase there's more to retry, continue loop to clear all retries first
 		default:
 			// Drop through in case retryc has nothing.
 		}
 
-		// send batched outc data anytime we're full and can't batch anymore
-		if len(batch) == cap(batch) {
-			batch = s.sendBatch(batch)
+		// send batched outc data anytime indicated or the batch is full
+		if sendBatch || len(batch) == cap(batch) {
+			var err error
+			batch, err = s.sendBatch(batch)
+			if err != nil {
+				sendBatch = true // guarentee we conitnue to complete sending the batch after retrying and before procecessing anything else
+				continue         // cut the iteration to process retries (nothing can be sent anyway since writeToConn failure with set s.conn to nil)
+			}
+			sendBatch = false
 		}
 
 		// flush buffer to outc and batch and/or send outc
@@ -330,8 +337,8 @@ func (s *netSink) run() {
 		case <-t.C:
 			s.flush() // from a higher level, stats are written to s.bufWriter.buf at GOSTATS_FLUSH_INTERVAL_SECONDS (or adhoc for Timers). this flushes them to outc every t.C tick
 		case done := <-s.doFlush:
-			// send batched outc data
-			batch = s.sendBatch(batch)
+			// indicate batched outc data to be sent in the next iteration
+			sendBatch = true
 
 			// drain and send remaining outc data
 			// todo re-evaluate: this code is probably redundant, outc should naturally become empty with `case buf := <-s.outc`, why is a forced drain required?
@@ -366,16 +373,26 @@ func (s *netSink) send(buf *bytes.Buffer) error {
 	return nil
 }
 
-func (s *netSink) sendBatch(batch []bytes.Buffer) []bytes.Buffer {
+func (s *netSink) sendBatch(batch []bytes.Buffer) ([]bytes.Buffer, error) {
 	n := len(batch)
-	for i := 0; i < n && s.conn != nil; i++ {
+
+	var i int
+	for i = 0; i < n && s.conn != nil; i++ {
 		buf := batch[i]
 		// todo can we just send all the batches in one call?
 		if err := s.send(&buf); err == nil {
 			putBuffer(&buf)
 		}
+		// if an error occurs we send the metric to the retry channel and make s.conn nil, breaking this loop and preventing further batch processing in this stack
 	}
-	return batch[:0]
+
+	var err error
+	if i != n {
+		i += 1 // the current element is in and will be processed over the retry channel
+		err = fmt.Errorf("batch send failure, only sent %d of %d", i, n)
+	}
+
+	return batch[i:n:n], err // return items in batch which we haven't sent
 }
 
 // writeToConn writes the buffer to the underlying conn.  May only be called
