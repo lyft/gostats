@@ -357,7 +357,7 @@ func (s *statStore) validateTags(tags map[string]string) {
 	}
 }
 
-// stat buffer and flush loop based on the specified ticker
+// buffer stats loop (force flushing once per stack) on the specified ticker
 func (s *statStore) StartContext(ctx context.Context, ticker *time.Ticker) {
 	for {
 		select {

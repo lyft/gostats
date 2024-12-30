@@ -285,8 +285,9 @@ func (s *netSink) run() {
 	t := time.NewTicker(flushInterval)
 	defer t.Stop()
 
-	// stat flush and write loop
+	// flush all buffered stats and send loop
 	for {
+		// writeToConn will set s.conn to nil on error, try to reconnect
 		if s.conn == nil {
 			if err := s.connect(addr); err != nil {
 				s.log.Warnf("connection error: %s", err)
@@ -324,11 +325,24 @@ func (s *netSink) run() {
 			batch = s.sendBatch(batch)
 		}
 
-		// flush to outc and batch and/or send outc
+		// flush buffer to outc and batch and/or send outc
 		select {
+		case <-t.C:
+			s.flush() // from a higher level, stats are written to s.bufWriter.buf at GOSTATS_FLUSH_INTERVAL_SECONDS (or adhoc for Timers). this flushes them to outc every t.C tick
 		case done := <-s.doFlush:
 			// send batched outc data
 			batch = s.sendBatch(batch)
+
+			// drain and send remaining outc data
+			// todo re-evaluate: this code is probably redundant, outc should naturally become empty with `case buf := <-s.outc`, why is a forced drain required?
+			n := len(s.outc) // Only flush pending buffers, this prevents an issue where continuous writes prevent the flush loop from exiting.
+			for i := 0; i < n && s.conn != nil; i++ {
+				buf := <-s.outc
+				if err := s.send(buf); err == nil {
+					putBuffer(buf)
+				}
+			}
+
 			close(done)
 		case buf := <-s.outc:
 			if isBatchEnabled {
@@ -340,8 +354,6 @@ func (s *netSink) run() {
 			if err := s.send(buf); err == nil {
 				putBuffer(buf)
 			}
-		case <-t.C:
-			s.flush() // from a higher level, stats are written to s.bufWriter.buf at GOSTATS_FLUSH_INTERVAL_SECONDS (or adhoc for Timers). this flushes them to outc every t.C tick
 		}
 	}
 }
