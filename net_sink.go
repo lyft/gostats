@@ -326,7 +326,7 @@ func (s *netSink) run() {
 			var err error
 			batch, err = s.sendBatch(batch)
 			if err != nil {
-				sendBatch = true // guarentee we conitnue to complete sending the batch after retrying and before procecessing anything else
+				sendBatch = true // guarantee we conitnue to complete sending the batch after retrying and before procecessing anything else
 				continue         // cut the iteration to process retries (nothing can be sent anyway since writeToConn failure with set s.conn to nil)
 			}
 			sendBatch = false
@@ -388,7 +388,7 @@ func (s *netSink) sendBatch(batch []bytes.Buffer) ([]bytes.Buffer, error) {
 
 	var err error
 	if i != n {
-		i += 1 // the current element is in and will be processed over the retry channel
+		i++ // the current element is in and will be processed over the retry channel
 		err = fmt.Errorf("batch send failure, only sent %d of %d", i, n)
 	}
 
