@@ -157,12 +157,12 @@ func (w *sinkWriter) Write(p []byte) (int, error) {
 }
 
 func (s *netSink) Flush() {
-	// forcefully flush the buffer to outc which will send immediately if batching is disabled
+	// forcefully flush the buffer to outc which will start sending immediately if batching is disabled
 	if s.flush() != nil {
 		return // nothing we can do
 	}
 	ch := make(chan struct{})
-	s.doFlush <- ch // send collected outc batches
+	s.doFlush <- ch // send collected outc batches and anything pre-batched in outc
 	<-ch
 }
 
@@ -280,12 +280,12 @@ func (s *netSink) run() {
 
 	batchSize := GetSettings().BatchSize
 	isBatchEnabled := batchSize > 0
-	batch := make([]bytes.Buffer, 0, batchSize) // todo do we need to worry about cap(s.outc)? it's a buffered channel but the read is one at a time anyway
+	batch := make([]bytes.Buffer, 0, batchSize) // todo do we need to worry about cap(s.outc)? it's a buffered channel but the write to batch, is one at a time anyway
 
 	t := time.NewTicker(flushInterval)
 	defer t.Stop()
 
-	// flush all buffered stats and send loop
+	// flush all/any buffered stats (on specified ticker) and send loop
 	for {
 		// writeToConn will set s.conn to nil on error, try to reconnect
 		if s.conn == nil {

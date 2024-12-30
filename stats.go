@@ -357,7 +357,7 @@ func (s *statStore) validateTags(tags map[string]string) {
 	}
 }
 
-// buffer stats loop (force flushing once per stack) on the specified ticker
+// buffer stats loop (forced flushing the buffer and sending all once per itteration) on the specified ticker
 func (s *statStore) StartContext(ctx context.Context, ticker *time.Ticker) {
 	for {
 		select {
@@ -396,7 +396,7 @@ func (s *statStore) Flush() {
 
 	flushableSink, ok := s.sink.(FlushableSink)
 	if ok {
-		flushableSink.Flush() // flushes buffer to outc which sends immediately if batching is disabled, also signals doFlush to send batched outc data if batching is enabaled
+		flushableSink.Flush() // flushes buffer to outc which starts sending immediately if batching is disabled, also signals doFlush to send batched outc data if batching is enabaled
 	}
 }
 
