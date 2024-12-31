@@ -280,7 +280,7 @@ func (s *netSink) run() {
 
 	batchSize := GetSettings().BatchSize
 	isBatchEnabled := batchSize > 0
-	batch := make([]bytes.Buffer, 0, batchSize)
+	batch := make([]bytes.Buffer, 0, batchSize+cap(s.outc)) // expand allocation to allow for draining outc. todo change to an array to optimize
 	sendBatch := false
 
 	t := time.NewTicker(flushInterval)
@@ -322,7 +322,7 @@ func (s *netSink) run() {
 		}
 
 		// send batched outc data anytime indicated or the batch is full
-		if sendBatch || len(batch) == cap(batch) {
+		if sendBatch || len(batch) == batchSize {
 			var err error
 			batch, err = s.sendBatch(batch)
 			if err != nil {
@@ -334,11 +334,19 @@ func (s *netSink) run() {
 
 		// flush buffer to outc and batch and/or send outc
 		select {
-		case <-t.C:
+		case <-t.C: // todo: should this not be the last case? if outc is at cap don't we risk blocking if we don't prioritizing reading/draining it? or just do some precalculation and error in the flush for this case?
 			s.flush() // from a higher level, stats are written to s.bufWriter.buf at GOSTATS_FLUSH_INTERVAL_SECONDS (or adhoc for Timers). this flushes them to outc every t.C tick
 		case done := <-s.doFlush:
-			// indicate batched outc data to be sent in the next iteration
-			sendBatch = true
+			if isBatchEnabled {
+				n := len(s.outc)                          // Only flush pending buffers, this prevents an issue where continuous writes prevent the flush loop from exiting.
+				for i := 0; i < n && s.conn != nil; i++ { // todo: this can cause batch to exceed allocation if current cap(batch) is small, if cap(batch) - len(batch) is less than the len(s.outc) we are draining
+					buf := <-s.outc
+					batch = append(batch, *buf)
+				}
+				// indicate batched outc data to be sent in the next iteration
+				sendBatch = true
+				continue
+			}
 
 			// drain and send remaining outc data
 			// todo re-evaluate: this code is probably redundant, outc should naturally become empty with `case buf := <-s.outc`, why is a forced drain required?
@@ -357,11 +365,13 @@ func (s *netSink) run() {
 				batch = append(batch, *buf)
 				continue
 			}
+
 			// send outc data immediately
 			if err := s.send(buf); err == nil {
 				putBuffer(buf)
 			}
 		}
+
 	}
 }
 
@@ -379,7 +389,7 @@ func (s *netSink) sendBatch(batch []bytes.Buffer) ([]bytes.Buffer, error) {
 	var i int
 	for i = 0; i < n && s.conn != nil; i++ {
 		buf := batch[i]
-		// todo can we just send all the batches in one call?
+		// todo: can we just send all the batches in one call? for tcp we might just be able to seperate with \n for and let `_, err := buf.WriteTo(s.conn)` write all at once... they should already be seperated this way looking at netSink.Flush*
 		if err := s.send(&buf); err == nil {
 			putBuffer(&buf)
 		}
