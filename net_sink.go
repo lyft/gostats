@@ -389,7 +389,7 @@ func (s *netSink) sendBatch(batch []bytes.Buffer) ([]bytes.Buffer, error) {
 	var i int
 	for i = 0; i < n && s.conn != nil; i++ {
 		buf := batch[i]
-		// todo: can we just send all the batches in one call? for tcp we might just be able to seperate with \n for and let `_, err := buf.WriteTo(s.conn)` write all at once... they should already be seperated this way looking at netSink.Flush*
+		// todo: can we just send all the batches in one call? for tcp we might just be able to separate with \n for and let `_, err := buf.WriteTo(s.conn)` write all at once... they should already be separated this way looking at netSink.Flush*
 		if err := s.send(&buf); err == nil {
 			putBuffer(&buf)
 		}
