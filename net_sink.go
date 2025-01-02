@@ -110,6 +110,7 @@ func NewNetSink(opts ...SinkOption) FlushableSink {
 
 	// Calculate buffer size based on protocol, for UDP we want to pick a
 	// buffer size that will prevent datagram fragmentation.
+	// todo: for batching does the batch size need to be a multiple of the buffer size to prevent fragmentation?
 	var bufSize int
 	switch s.conf.StatsdProtocol {
 	case "udp", "udp4", "udp6":
@@ -118,8 +119,8 @@ func NewNetSink(opts ...SinkOption) FlushableSink {
 		bufSize = defaultBufferSizeTCP
 	}
 
-	s.outc = make(chan *bytes.Buffer, approxMaxMemBytes/bufSize) // todo: this creates a channel with a buffer of 2928 for udp and 64 for tcp do we need to influence batch size based on this?
-	s.retryc = make(chan *bytes.Buffer, 1)                       // It should be okay to limit this given once we write to the retry channel we break the connection, and in subsequent processing we preferentially process from this over outc.
+	s.outc = make(chan *bytes.Buffer, approxMaxMemBytes/bufSize)
+	s.retryc = make(chan *bytes.Buffer, 1) // It should be okay to limit this given once we write to the retry channel we break the connection, and in subsequent processing we preferentially process from this over outc.
 
 	writer := &sinkWriter{outc: s.outc}
 	s.bufWriter = bufio.NewWriterSize(writer, bufSize)
@@ -156,13 +157,13 @@ func (w *sinkWriter) Write(p []byte) (int, error) {
 	}
 }
 
+// flush the entire buffer to outc and drain it, either sending directly or batching
 func (s *netSink) Flush() {
-	// forcefully flush the buffer to outc which will start sending immediately if batching is disabled
 	if s.flush() != nil {
 		return // nothing we can do
 	}
 	ch := make(chan struct{})
-	s.doFlush <- ch // send collected outc batches and anything pre-batched in outc
+	s.doFlush <- ch
 	<-ch
 }
 
@@ -284,16 +285,19 @@ func (s *netSink) run() {
 	isBatchEnabled := batchSize > 0
 	batch := make([]bytes.Buffer, 0, batchSize+cap(s.outc)) // expand allocation to allow for draining outc. todo change to an array to optimize
 	sendBatch := false
-	batchTimeout := time.Duration(settings.FlushIntervalS) * time.Second // todo maybe use a new configuration for batch flush interval
+	batchTimeout := time.Duration(settings.FlushIntervalS) * time.Second // todo: is there any need to use a new configuration for this?
 	batchInterval := time.After(batchTimeout)
 
 	t := time.NewTicker(flushInterval)
 	defer t.Stop()
 
-	// flush all/any buffered stats (on specified ticker) and send loop
+	// outc send loop (if batching is enabled, send every batchTimeout, if indicated by doFlush, or if the batch is full)
+	// auto-flushes any/all buffered stats (on specified ticker) to outc
 	for {
 		// writeToConn will set s.conn to nil on error, try to reconnect
 		if s.conn == nil {
+			// connect to statsd server
+			// the connection will be persisted unless an error occurs. thereby with batching is used the entire batch will be streamed under 1 connection
 			if err := s.connect(addr); err != nil {
 				s.log.Warnf("connection error: %s", err)
 
@@ -311,7 +315,7 @@ func (s *netSink) run() {
 			reconnectFailed = false
 		}
 
-		// Drain all retries first
+		// Drain all retries first and continue loop if there are multiple things to retry
 		select {
 		case buf := <-s.retryc:
 			if err := s.writeToConn(buf); err != nil {
@@ -320,7 +324,7 @@ func (s *netSink) run() {
 				s.mu.Unlock()
 			}
 			putBuffer(buf)
-			continue // if error we may need to reconnect so go back to the top of the next itteration and maybe there's more to retry, continue loop to clear all retries first
+			continue // if error we may need to reconnect so go back to the top of the next iteration
 		default:
 			// Drop through in case retryc has nothing.
 		}
@@ -330,17 +334,18 @@ func (s *netSink) run() {
 			var err error
 			batch, err = s.sendBatch(batch)
 			if err != nil {
-				sendBatch = true // guarantee for all cases that we complete sending the batch after retrying and before procecessing anything else
-				continue         // cut the iteration to process retries (nothing can be sent anyway since writeToConn failure with set s.conn to nil)
+				sendBatch = true // indicate to continue sending out the batch in the next iterration if any erros occur (needed if entering from len(batch) >= batchSize)
+				continue         // cut the iteration to process retry (s.conn will be nil anyway)
 			}
 			sendBatch = false
 			batchInterval = time.After(batchTimeout)
 		}
 
-		// flush buffer to outc and batch and/or send outc
 		select {
-		case <-t.C: // todo: should this not be the last case? if outc is at cap don't we risk blocking if we don't prioritizing reading/draining it? or just do some precalculation and error in the flush for this case?
-			s.flush() // from a higher level, stats are written to s.bufWriter.buf at GOSTATS_FLUSH_INTERVAL_SECONDS (or adhoc for Timers). this flushes them to outc every t.C tick
+		// flush buffer to outc
+		// from a higher level, stats are written to s.bufWriter.buf at GOSTATS_FLUSH_INTERVAL_SECONDS (or adhoc for Timers). this flushes them to outc every t.C tick
+		case <-t.C:
+			s.flush() // todo: if outc is at cap don't we risk blocking if we don't prioritizing reading it or would the flush error out?
 
 			select {
 			case <-batchInterval:
@@ -349,18 +354,16 @@ func (s *netSink) run() {
 				}
 			default:
 			}
+		// drain all outc data. either batch or send immediatedly
 		case done := <-s.doFlush:
 			if isBatchEnabled {
-				n := len(s.outc)                          // Only flush pending buffers, this prevents an issue where continuous writes prevent the flush loop from exiting.
-				for i := 0; i < n && s.conn != nil; i++ { // todo: this can cause batch to exceed allocation if current cap(batch) is small, if cap(batch) - len(batch) is less than the len(s.outc) we are draining
+				n := len(s.outc)
+				for i := 0; i < n && s.conn != nil; i++ {
 					buf := <-s.outc
-					batch = append(batch, *buf)
+					batch = append(batch, *buf) // todo: we may exceed allocation here if if current cap(batch) is small, if cap(batch) - len(batch) is less than the len(s.outc) we are draining
 				}
-				// indicate batched outc data to be sent in the next iteration
-				sendBatch = true
+				sendBatch = true // indicate batched outc data to be sent in the next iteration
 			} else {
-				// drain and send remaining outc data
-				// todo re-evaluate: this code is probably redundant, outc should naturally become empty with `case buf := <-s.outc`, why is a forced drain required?
 				n := len(s.outc) // Only flush pending buffers, this prevents an issue where continuous writes prevent the flush loop from exiting.
 				for i := 0; i < n && s.conn != nil; i++ {
 					buf := <-s.outc
@@ -372,14 +375,13 @@ func (s *netSink) run() {
 			}
 
 			close(done)
+		// drain one stat from outc if avaible. either batch or send immediatedly
 		case buf := <-s.outc:
 			if isBatchEnabled {
-				// batch outc data and rely on the doFlush or max capacity to send
 				batch = append(batch, *buf)
 				continue
 			}
 
-			// send outc data immediately
 			if err := s.send(buf); err == nil {
 				putBuffer(buf)
 			}
@@ -401,7 +403,6 @@ func (s *netSink) sendBatch(batch []bytes.Buffer) ([]bytes.Buffer, error) {
 	var i int
 	for i = 0; i < n && s.conn != nil; i++ {
 		buf := batch[i]
-		// todo: can we just send all the batches in one call? for tcp we might just be able to separate with \n for and let `_, err := buf.WriteTo(s.conn)` write all at once... they should already be separated this way looking at netSink.Flush*
 		if err := s.send(&buf); err == nil {
 			putBuffer(&buf)
 		}
@@ -410,11 +411,11 @@ func (s *netSink) sendBatch(batch []bytes.Buffer) ([]bytes.Buffer, error) {
 
 	var err error
 	if i != n {
-		i++                                                              // the current element is in and will be processed over the retry channel
+		i++                                                              // the current element will be processed over the retry channel so assume it processed from the batch
 		err = fmt.Errorf("batch send failure, only sent %d of %d", i, n) // todo log this
 	}
 
-	return batch[i:n:n], err // return items in batch which we haven't sent. todo make sure the data in retryc is not duplicated in our response batch, otherwise we may infinite loop
+	return batch[i:n:n], err // return items in batch which we haven't sent. todo: make sure the data in retryc is not duplicated in our response batch, otherwise we may infinite loop
 }
 
 // writeToConn writes the buffer to the underlying conn.  May only be called

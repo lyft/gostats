@@ -313,7 +313,7 @@ func (t *timer) AddDuration(dur time.Duration) {
 }
 
 func (t *timer) AddValue(value float64) {
-	t.sink.FlushTimer(t.name, value) // writes the timer value to a buffer which will be flushed to outc at an interval, will be sent immediately when flushed to outc if batching is not enabeld
+	t.sink.FlushTimer(t.name, value) // writes the timer value to a buffer. this buffer will be flushed to a channel (outc) at an interval and from this channel either batched or sent directly
 }
 
 func (t *timer) AllocateSpan() Timespan {
@@ -357,7 +357,7 @@ func (s *statStore) validateTags(tags map[string]string) {
 	}
 }
 
-// buffer stats loop (forced flushing the buffer and sending all once per itteration) on the specified ticker
+// counter and gauage buffer and flush loop on the specified ticker
 func (s *statStore) StartContext(ctx context.Context, ticker *time.Ticker) {
 	for {
 		select {
@@ -374,6 +374,7 @@ func (s *statStore) Start(ticker *time.Ticker) {
 	s.StartContext(context.Background(), ticker)
 }
 
+// writes any stored counters and gauages to a buffer which will be flushed to a channel (outc) at an interval (in the outc send loop) or at the end of this stack
 func (s *statStore) Flush() {
 	s.mu.RLock()
 	for _, g := range s.statGenerators {
@@ -384,19 +385,19 @@ func (s *statStore) Flush() {
 	s.counters.Range(func(key, v interface{}) bool {
 		// do not flush counters that are set to zero
 		if value := v.(*counter).latch(); value != 0 {
-			s.sink.FlushCounter(key.(string), value) // writes counters to a buffer which will be flushed to outc both at an interval and at the end of this stack
+			s.sink.FlushCounter(key.(string), value)
 		}
 		return true
 	})
 
 	s.gauges.Range(func(key, v interface{}) bool {
-		s.sink.FlushGauge(key.(string), v.(*gauge).Value()) // writes gauages to a buffer which will be flushed to outc both at an interval and at the end of this stack
+		s.sink.FlushGauge(key.(string), v.(*gauge).Value())
 		return true
 	})
 
 	flushableSink, ok := s.sink.(FlushableSink)
 	if ok {
-		flushableSink.Flush() // flushes buffer to outc which starts sending immediately if batching is disabled, also signals doFlush to send batched outc data if batching is enabaled
+		flushableSink.Flush() // flushes everything buffered to a channel (outc) and specifies outc to be drained to either a batch or sent immediatly
 	}
 }
 
