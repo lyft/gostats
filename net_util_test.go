@@ -347,7 +347,7 @@ func (m *errorCon) Write(b []byte) (int, error) {
 	return len(b), nil
 }
 
-func (m *errorCon) Read(b []byte) (int, error) {
+func (m *errorCon) Read(_ []byte) (int, error) {
 	return 0, io.EOF
 }
 
@@ -355,7 +355,7 @@ func (m *errorCon) Close() error {
 	return nil
 }
 
-func (m *errorCon) SetWriteDeadline(t time.Time) error {
+func (m *errorCon) SetWriteDeadline(_ time.Time) error {
 	return nil
 }
 
@@ -367,11 +367,11 @@ func (m *errorCon) RemoteAddr() net.Addr {
 	return &net.TCPAddr{}
 }
 
-func (m *errorCon) SetDeadline(t time.Time) error {
+func (m *errorCon) SetDeadline(_ time.Time) error {
 	return nil
 }
 
-func (m *errorCon) SetReadDeadline(t time.Time) error {
+func (m *errorCon) SetReadDeadline(_ time.Time) error {
 	return nil
 }
 

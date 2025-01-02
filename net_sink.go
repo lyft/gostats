@@ -283,7 +283,7 @@ func (s *netSink) run() {
 
 	batchSize := settings.BatchSize
 	isBatchEnabled := batchSize > 0
-	batch := make([]bytes.Buffer, 0, batchSize+cap(s.outc)) // overallocate to consider draining all outc data. despite the exppanded allocation, batchSize is still used to determine if we send the batched stats
+	batch := make([]bytes.Buffer, 0, batchSize+cap(s.outc)) // overallocate to consider draining all outc data. despite the expanded allocation, batchSize is still used to determine if we send the batched stats
 	sendBatch := false
 	batchTimeout := time.Duration(settings.FlushIntervalS) * time.Second // todo: is there any need to use a new configuration for this?
 	batchInterval := time.After(batchTimeout)
