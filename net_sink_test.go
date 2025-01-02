@@ -2,6 +2,7 @@ package stats
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"fmt"
 	"io"
@@ -995,6 +996,47 @@ func TestFlushTimerBatchingAutoSendAfterTimerout(t *testing.T) {
 
 	os.Unsetenv("GOSTATS_BATCH_SIZE")
 	os.Unsetenv("GOSTATS_FLUSH_INTERVAL_SECONDS")
+}
+
+func TestNetSink_SendBatch_Error(t *testing.T) {
+	netSink, mockedConn := newErrorSink(1)
+
+	batch := []bytes.Buffer{
+		*bytes.NewBufferString("metric1"),
+		*bytes.NewBufferString("metric2"),
+		*bytes.NewBufferString("metric3"),
+	}
+
+	remaining, err := netSink.sendBatch(batch)
+	if err == nil {
+		t.Errorf("expected error, got nil")
+	}
+
+	if len(remaining) != 1 {
+		t.Fatalf("expected 1 remaining buffer, got %d", len(remaining))
+	}
+
+	if remaining[0].String() != "metric3" {
+		t.Errorf("expected remaining buffer to be 'metric3', got '%s'", remaining[0].String())
+	}
+
+	select {
+	case retryStat := <-netSink.retryc:
+		if retryStat.String() != "metric2" {
+			t.Errorf("expected retry to be 'metric2', got %s", retryStat.String())
+		}
+	default:
+		t.Errorf("expected 1 retry, got none")
+	}
+
+	if len(mockedConn.writes) != 1 {
+		t.Fatalf("expected 1 write, got %d", len(mockedConn.writes))
+	}
+
+	writtenStat := string(mockedConn.writes[0])
+	if writtenStat != "metric1" {
+		t.Errorf("expected write to be 'metric1', got %s", writtenStat)
+	}
 }
 
 func TestNetSink_Integration_TCP(t *testing.T) {

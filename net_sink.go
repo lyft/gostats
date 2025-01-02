@@ -283,7 +283,7 @@ func (s *netSink) run() {
 
 	batchSize := settings.BatchSize
 	isBatchEnabled := batchSize > 0
-	batch := make([]bytes.Buffer, 0, batchSize+cap(s.outc)) // expand allocation to allow for draining outc. todo change to an array to optimize
+	batch := make([]bytes.Buffer, 0, batchSize+cap(s.outc)) // overallocate to consider draining all outc data. despite the exppanded allocation, batchSize is still used to determine if we send the batched stats
 	sendBatch := false
 	batchTimeout := time.Duration(settings.FlushIntervalS) * time.Second // todo: is there any need to use a new configuration for this?
 	batchInterval := time.After(batchTimeout)
@@ -360,7 +360,7 @@ func (s *netSink) run() {
 				n := len(s.outc)
 				for i := 0; i < n && s.conn != nil; i++ {
 					buf := <-s.outc
-					batch = append(batch, *buf) // todo: we may exceed allocation here if if current cap(batch) is small, if cap(batch) - len(batch) is less than the len(s.outc) we are draining
+					batch = append(batch, *buf)
 				}
 				sendBatch = true // indicate batched outc data to be sent in the next iteration
 			} else {
@@ -411,11 +411,10 @@ func (s *netSink) sendBatch(batch []bytes.Buffer) ([]bytes.Buffer, error) {
 
 	var err error
 	if i != n {
-		i++                                                              // the current element will be processed over the retry channel so assume it processed from the batch
-		err = fmt.Errorf("batch send failure, only sent %d of %d", i, n) // todo log this
+		err = fmt.Errorf("batch send failure, only sent %d of %d", i, n)
 	}
 
-	return batch[i:n:n], err // return items in batch which we haven't sent. todo: make sure the data in retryc is not duplicated in our response batch, otherwise we may infinite loop
+	return batch[i:n:n], err
 }
 
 // writeToConn writes the buffer to the underlying conn.  May only be called

@@ -332,6 +332,61 @@ func (s *netTestSink) CommandEnv(t testing.TB) []string {
 	)
 }
 
+type errorCon struct {
+	writes          [][]byte
+	writeErrorAfter int
+	writeCount      int
+}
+
+func (m *errorCon) Write(b []byte) (int, error) {
+	if m.writeErrorAfter > 0 && m.writeCount >= m.writeErrorAfter {
+		return 0, fmt.Errorf("mock write error")
+	}
+	m.writes = append(m.writes, b)
+	m.writeCount++
+	return len(b), nil
+}
+
+func (m *errorCon) Read(b []byte) (int, error) {
+	return 0, io.EOF
+}
+
+func (m *errorCon) Close() error {
+	return nil
+}
+
+func (m *errorCon) SetWriteDeadline(t time.Time) error {
+	return nil
+}
+
+func (m *errorCon) LocalAddr() net.Addr {
+	return &net.TCPAddr{}
+}
+
+func (m *errorCon) RemoteAddr() net.Addr {
+	return &net.TCPAddr{}
+}
+
+func (m *errorCon) SetDeadline(t time.Time) error {
+	return nil
+}
+
+func (m *errorCon) SetReadDeadline(t time.Time) error {
+	return nil
+}
+
+func newErrorSink(errorAfter int) (*netSink, *errorCon) {
+	mockedConn := &errorCon{
+		writeErrorAfter: errorAfter,
+	}
+	sink := &netSink{
+		conn:   mockedConn,
+		retryc: make(chan *bytes.Buffer, 1),
+	}
+
+	return sink, mockedConn
+}
+
 func reconnectRetry(t testing.TB, fn func() error) {
 	const (
 		Retry   = time.Second / 4
