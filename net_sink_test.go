@@ -943,6 +943,60 @@ func TestFlushTimerBatchingForUDP(t *testing.T) {
 	os.Unsetenv("GOSTATS_BATCH_SIZE")
 }
 
+func TestFlushTimerBatchingAutoSendEveryBatch(t *testing.T) {
+	err1 := os.Setenv("GOSTATS_BATCH_SIZE", "1")
+	err2 := os.Setenv("GOSTATS_FLUSH_INTERVAL_SECONDS", "5")
+	if err1 != nil || err2 != nil {
+		t.Fatalf("Failed to set environment variable. GOSTATS_BATCH_SIZE: %s, GOSTATS_FLUSH_INTERVAL_SECONDS: %s", err1, err2)
+	}
+
+	expected := 3840
+
+	ts, sink := setupTestNetSink(t, "tcp", false)
+	defer ts.Close()
+
+	for i := 0; i < 256; i++ {
+		sink.FlushTimer("timer_int", float64(i%10))
+	}
+
+	time.Sleep(2001 * time.Millisecond)
+
+	bufferSizer := len(ts.String())
+	if bufferSizer != expected {
+		t.Errorf("Not all stats were written\ngot buffer size:\n%d\nwanted:\n%d\n", bufferSizer, expected)
+	}
+
+	os.Unsetenv("GOSTATS_BATCH_SIZE")
+	os.Unsetenv("GOSTATS_FLUSH_INTERVAL_SECONDS")
+}
+
+func TestFlushTimerBatchingAutoSendAfterTimerout(t *testing.T) {
+	err1 := os.Setenv("GOSTATS_BATCH_SIZE", "300")
+	err2 := os.Setenv("GOSTATS_FLUSH_INTERVAL_SECONDS", "5")
+	if err1 != nil || err2 != nil {
+		t.Fatalf("Failed to set environment variable. GOSTATS_BATCH_SIZE: %s, GOSTATS_FLUSH_INTERVAL_SECONDS: %s", err1, err2)
+	}
+
+	expected := 3840
+
+	ts, sink := setupTestNetSink(t, "tcp", false)
+	defer ts.Close()
+
+	for i := 0; i < 256; i++ {
+		sink.FlushTimer("timer_int", float64(i%10))
+	}
+
+	time.Sleep(6001 * time.Millisecond)
+
+	bufferSizer := len(ts.String())
+	if bufferSizer != expected {
+		t.Errorf("Not all stats were written\ngot buffer size:\n%d\nwanted:\n%d\n", bufferSizer, expected)
+	}
+
+	os.Unsetenv("GOSTATS_BATCH_SIZE")
+	os.Unsetenv("GOSTATS_FLUSH_INTERVAL_SECONDS")
+}
+
 func TestNetSink_Integration_TCP(t *testing.T) {
 	testNetSinkIntegration(t, "tcp")
 }
