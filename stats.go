@@ -397,7 +397,7 @@ func (s *statStore) Flush() {
 
 	flushableSink, ok := s.sink.(FlushableSink)
 	if ok {
-		flushableSink.Flush() // flushes everything buffered to a channel (outc) and specifies outc to be drained to either a batch or sent immediatly
+		flushableSink.Flush() // flushes everything buffered to a channel (outc) and specifies outc to be drained to either a batch or sent immediately
 	}
 }
 
