@@ -319,7 +319,7 @@ func (s *netSink) run() {
 				s.mu.Unlock()
 			}
 			putBuffer(buf)
-			continue // incase there's more to retry, continue loop to clear all retries first
+			continue // if error we may need to reconnect so go back to the top of the next itteration and maybe there's more to retry, continue loop to clear all retries first
 		default:
 			// Drop through in case retryc has nothing.
 		}
@@ -407,8 +407,8 @@ func (s *netSink) sendBatch(batch []bytes.Buffer) ([]bytes.Buffer, error) {
 
 	var err error
 	if i != n {
-		i++ // the current element is in and will be processed over the retry channel
-		err = fmt.Errorf("batch send failure, only sent %d of %d", i, n)
+		i++                                                              // the current element is in and will be processed over the retry channel
+		err = fmt.Errorf("batch send failure, only sent %d of %d", i, n) // todo log this
 	}
 
 	return batch[i:n:n], err // return items in batch which we haven't sent
