@@ -284,9 +284,10 @@ func (s *netSink) run() {
 	isBatchEnabled := batchSize > 0
 	batch := make([]bytes.Buffer, 0, batchSize+cap(s.outc)) // expand allocation to allow for draining outc. todo change to an array to optimize
 	sendBatch := false
+	batchTimeout := time.Duration(settings.FlushIntervalS) * time.Second // todo maybe use a new configuration for batch flush interval
+	batchInterval := time.After(batchTimeout)
 
 	t := time.NewTicker(flushInterval)
-	bt := time.NewTicker(time.Duration(settings.FlushIntervalS) * time.Second) // todo maybe use a new configuration for batch flush interval
 	defer t.Stop()
 
 	// flush all/any buffered stats (on specified ticker) and send loop
@@ -329,16 +330,25 @@ func (s *netSink) run() {
 			var err error
 			batch, err = s.sendBatch(batch)
 			if err != nil {
-				sendBatch = true // guarentee for all cases that we complete sending the batch after retrying and before procecessing anything else
+				sendBatch = true // guarantee for all cases that we complete sending the batch after retrying and before procecessing anything else
 				continue         // cut the iteration to process retries (nothing can be sent anyway since writeToConn failure with set s.conn to nil)
 			}
 			sendBatch = false
+			batchInterval = time.After(batchTimeout)
 		}
 
 		// flush buffer to outc and batch and/or send outc
 		select {
 		case <-t.C: // todo: should this not be the last case? if outc is at cap don't we risk blocking if we don't prioritizing reading/draining it? or just do some precalculation and error in the flush for this case?
 			s.flush() // from a higher level, stats are written to s.bufWriter.buf at GOSTATS_FLUSH_INTERVAL_SECONDS (or adhoc for Timers). this flushes them to outc every t.C tick
+
+			select {
+			case <-batchInterval:
+				if len(batch) > 0 {
+					sendBatch = true
+				}
+			default:
+			}
 		case done := <-s.doFlush:
 			if isBatchEnabled {
 				n := len(s.outc)                          // Only flush pending buffers, this prevents an issue where continuous writes prevent the flush loop from exiting.
@@ -348,18 +358,17 @@ func (s *netSink) run() {
 				}
 				// indicate batched outc data to be sent in the next iteration
 				sendBatch = true
-				continue
-			}
-
-			// drain and send remaining outc data
-			// todo re-evaluate: this code is probably redundant, outc should naturally become empty with `case buf := <-s.outc`, why is a forced drain required?
-			n := len(s.outc) // Only flush pending buffers, this prevents an issue where continuous writes prevent the flush loop from exiting.
-			for i := 0; i < n && s.conn != nil; i++ {
-				buf := <-s.outc
-				if err := s.send(buf); err == nil {
-					putBuffer(buf)
+			} else {
+				// drain and send remaining outc data
+				// todo re-evaluate: this code is probably redundant, outc should naturally become empty with `case buf := <-s.outc`, why is a forced drain required?
+				n := len(s.outc) // Only flush pending buffers, this prevents an issue where continuous writes prevent the flush loop from exiting.
+				for i := 0; i < n && s.conn != nil; i++ {
+					buf := <-s.outc
+					if err := s.send(buf); err == nil {
+						putBuffer(buf)
+					}
+					// if an error occurs we send the metric to the retry channel and make s.conn nil, breaking this loop and preventing further batch processing in this stack
 				}
-				// if an error occurs we send the metric to the retry channel and make s.conn nil, breaking this loop and preventing further batch processing in this stack
 			}
 
 			close(done)
@@ -374,12 +383,6 @@ func (s *netSink) run() {
 			if err := s.send(buf); err == nil {
 				putBuffer(buf)
 			}
-		}
-
-		select {
-		case <-bt.C:
-			sendBatch = true
-		default:
 		}
 	}
 }
@@ -411,7 +414,7 @@ func (s *netSink) sendBatch(batch []bytes.Buffer) ([]bytes.Buffer, error) {
 		err = fmt.Errorf("batch send failure, only sent %d of %d", i, n) // todo log this
 	}
 
-	return batch[i:n:n], err // return items in batch which we haven't sent
+	return batch[i:n:n], err // return items in batch which we haven't sent. todo make sure the data in retryc is not duplicated in our response batch, otherwise we may infinite loop
 }
 
 // writeToConn writes the buffer to the underlying conn.  May only be called
