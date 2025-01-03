@@ -47,7 +47,7 @@ type Settings struct {
 	// Enable batching stats to reduce intermittent sends.
 	BatchEnabled bool `envconfig:"GOSTATS_BATCH_ENABLED" default:"false"`
 	// Maximum number of stats to batch before sending.
-	// For UDP, despite this configuration, stats will naturally be distributed over multiple packets, single stats are guarenteed to fit in 1 packet but we will still fragment the batch.
+	// For UDP, despite this configuration, stats will naturally be distributed over multiple packets, single stats are guaranteed to fit in 1 packet but we will still fragment the batch.
 	// Depends on BatchEnabled.
 	BatchSize int `envconfig:"GOSTATS_BATCH_SIZE" default:"100"`
 	// Fallback timeout to send the batch.
