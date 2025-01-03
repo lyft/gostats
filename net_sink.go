@@ -345,13 +345,16 @@ func (s *netSink) run() {
 		// flush buffer to outc
 		// from a higher level, stats are written to s.bufWriter.buf at GOSTATS_FLUSH_INTERVAL_SECONDS (or adhoc for Timers). this flushes them to outc every t.C tick
 		case <-t.C:
-			s.flush() // todo: if outc is at cap don't we risk blocking if we don't prioritizing reading it or would the flush error out?
+			s.flush() // if outc is or becomes full the sinkWriter will error and we will gracefully drop the remainding buffered stats
 
 			select {
 			case <-batchInterval:
 				if len(batch) > 0 {
 					sendBatch = true
+				} else {
+					batchInterval = time.After(batchTimeout)
 				}
+
 			default:
 			}
 		// drain all outc data. either batch or send immediatedly

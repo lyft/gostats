@@ -848,7 +848,7 @@ func testNetSinkIntegration(t *testing.T, protocol string) {
 	})
 }
 
-func TestFlushTimerNoBatching(t *testing.T) {
+func TestNoBatching(t *testing.T) {
 	err := os.Setenv("GOSTATS_BATCH_SIZE", "0")
 	if err != nil {
 		t.Fatalf("Failed to set environment variable: %s", err)
@@ -876,77 +876,79 @@ func TestFlushTimerNoBatching(t *testing.T) {
 	os.Unsetenv("GOSTATS_BATCH_SIZE")
 }
 
-func TestFlushTimerBatchingForTCP(t *testing.T) {
-	err := os.Setenv("GOSTATS_BATCH_SIZE", "64")
-	if err != nil {
-		t.Fatalf("Failed to set environment variable: %s", err)
+func TestBatchingForTCP(t *testing.T) {
+	err1 := os.Setenv("GOSTATS_BATCH_SIZE", "300")
+	err2 := os.Setenv("GOSTATS_FLUSH_INTERVAL_SECONDS", "100000") // effectively disable batch send interval
+	if err1 != nil || err2 != nil {
+		t.Fatalf("Failed to set environment variable. GOSTATS_BATCH_SIZE: %s, GOSTATS_FLUSH_INTERVAL_SECONDS: %s", err1, err2)
 	}
 
-	expected := [...]string{
-		"timer_int:1|ms\n",
-		"timer_float:1.230000|ms\n",
-	}
+	expected := 3840
 
 	ts, sink := setupTestNetSink(t, "tcp", false)
 	defer ts.Close()
 
-	sink.FlushTimer("timer_int", 1)
-	sink.FlushTimer("timer_float", 1.23)
-	time.Sleep(2001 * time.Millisecond)
+	// more than outc capacity which is 64 for tcp, despite this our batch size is bigger and we should batch the data and only sendBatch once
+	for i := 0; i < 256; i++ {
+		sink.FlushTimer("timer_int", float64(i%10))
+	}
 
+	time.Sleep(2001 * time.Millisecond)
 	if ts.String() != "" {
 		t.Errorf("Stats were written despite forced batching")
 	}
 
-	sink.Flush()
-	time.Sleep(2001 * time.Millisecond)
+	sink.Flush() // drain all outc and send
 
-	exp := strings.Join(expected[:], "")
-	buf := ts.String()
-	if buf != exp {
-		t.Errorf("Not all stats were written\ngot:\n%q\nwant:\n%q\n", buf, exp)
+	time.Sleep(1000 * time.Millisecond)
+
+	bufferSize := len(ts.String())
+	if bufferSize != expected {
+		t.Errorf("Not all stats were written\ngot buffer size:\n%d\nwanted:\n%d\n", bufferSize, expected)
 	}
 
 	os.Unsetenv("GOSTATS_BATCH_SIZE")
+	os.Unsetenv("GOSTATS_FLUSH_INTERVAL_SECONDS")
 }
 
-func TestFlushTimerBatchingForUDP(t *testing.T) {
-	err := os.Setenv("GOSTATS_BATCH_SIZE", "2928")
-	if err != nil {
-		t.Fatalf("Failed to set environment variable: %s", err)
+func TestBatchingForUDP(t *testing.T) {
+	err1 := os.Setenv("GOSTATS_BATCH_SIZE", "5000")
+	err2 := os.Setenv("GOSTATS_FLUSH_INTERVAL_SECONDS", "100000") // effectively disable batch send interval
+	if err1 != nil || err2 != nil {
+		t.Fatalf("Failed to set environment variable. GOSTATS_BATCH_SIZE: %s, GOSTATS_FLUSH_INTERVAL_SECONDS: %s", err1, err2)
 	}
 
-	expected := [...]string{
-		"timer_int:1|ms\n",
-		"timer_float:1.230000|ms\n",
-	}
+	expected := 45000
 
 	ts, sink := setupTestNetSink(t, "udp", false)
 	defer ts.Close()
 
-	sink.FlushTimer("timer_int", 1)
-	sink.FlushTimer("timer_float", 1.23)
-	time.Sleep(2001 * time.Millisecond)
+	// more than outc capacity which is 2928 for udp, despite this our batch size is bigger and we should batch the data and only sendBatch once
+	for i := 0; i < 3000; i++ {
+		sink.FlushTimer("timer_int", float64(i%10))
+	}
 
+	time.Sleep(2001 * time.Millisecond)
 	if ts.String() != "" {
 		t.Errorf("Stats were written despite forced batching")
 	}
 
-	sink.Flush()
-	time.Sleep(2001 * time.Millisecond)
+	sink.Flush() // drain all outc and send
 
-	exp := strings.Join(expected[:], "")
-	buf := ts.String()
-	if buf != exp {
-		t.Errorf("Not all stats were written\ngot:\n%q\nwant:\n%q\n", buf, exp)
+	time.Sleep(1000 * time.Millisecond)
+
+	bufferSize := len(ts.String())
+	if bufferSize != expected {
+		t.Errorf("Not all stats were written\ngot buffer size:\n%d\nwanted:\n%d\n", bufferSize, expected)
 	}
 
 	os.Unsetenv("GOSTATS_BATCH_SIZE")
+	os.Unsetenv("GOSTATS_FLUSH_INTERVAL_SECONDS")
 }
 
-func TestFlushTimerBatchingAutoSendEveryBatch(t *testing.T) {
+func TestBatchingAutoSendWhenBatchIsFull(t *testing.T) {
 	err1 := os.Setenv("GOSTATS_BATCH_SIZE", "1")
-	err2 := os.Setenv("GOSTATS_FLUSH_INTERVAL_SECONDS", "5")
+	err2 := os.Setenv("GOSTATS_FLUSH_INTERVAL_SECONDS", "100000") // effectively disable batch send interval
 	if err1 != nil || err2 != nil {
 		t.Fatalf("Failed to set environment variable. GOSTATS_BATCH_SIZE: %s, GOSTATS_FLUSH_INTERVAL_SECONDS: %s", err1, err2)
 	}
@@ -960,20 +962,20 @@ func TestFlushTimerBatchingAutoSendEveryBatch(t *testing.T) {
 		sink.FlushTimer("timer_int", float64(i%10))
 	}
 
-	time.Sleep(2001 * time.Millisecond)
+	time.Sleep(2001 * time.Millisecond) // we only flush to outc ~every second but the batch will be sent ~immediately as it's always full
 
-	bufferSizer := len(ts.String())
-	if bufferSizer != expected {
-		t.Errorf("Not all stats were written\ngot buffer size:\n%d\nwanted:\n%d\n", bufferSizer, expected)
+	bufferSize := len(ts.String())
+	if bufferSize != expected {
+		t.Errorf("Not all stats were written\ngot buffer size:\n%d\nwanted:\n%d\n", bufferSize, expected)
 	}
 
 	os.Unsetenv("GOSTATS_BATCH_SIZE")
 	os.Unsetenv("GOSTATS_FLUSH_INTERVAL_SECONDS")
 }
 
-func TestFlushTimerBatchingAutoSendAfterTimerout(t *testing.T) {
-	err1 := os.Setenv("GOSTATS_BATCH_SIZE", "300")
-	err2 := os.Setenv("GOSTATS_FLUSH_INTERVAL_SECONDS", "5")
+func TestBatchingAutoSendOnInterval(t *testing.T) {
+	err1 := os.Setenv("GOSTATS_BATCH_SIZE", "10000")
+	err2 := os.Setenv("GOSTATS_FLUSH_INTERVAL_SECONDS", "2")
 	if err1 != nil || err2 != nil {
 		t.Fatalf("Failed to set environment variable. GOSTATS_BATCH_SIZE: %s, GOSTATS_FLUSH_INTERVAL_SECONDS: %s", err1, err2)
 	}
@@ -987,18 +989,18 @@ func TestFlushTimerBatchingAutoSendAfterTimerout(t *testing.T) {
 		sink.FlushTimer("timer_int", float64(i%10))
 	}
 
-	time.Sleep(6001 * time.Millisecond)
+	time.Sleep(3001 * time.Millisecond) // we only flush to outc ~every second and send the batch ~every 2 seconds
 
-	bufferSizer := len(ts.String())
-	if bufferSizer != expected {
-		t.Errorf("Not all stats were written\ngot buffer size:\n%d\nwanted:\n%d\n", bufferSizer, expected)
+	bufferSize := len(ts.String())
+	if bufferSize != expected {
+		t.Errorf("Not all stats were written\ngot buffer size:\n%d\nwanted:\n%d\n", bufferSize, expected)
 	}
 
 	os.Unsetenv("GOSTATS_BATCH_SIZE")
 	os.Unsetenv("GOSTATS_FLUSH_INTERVAL_SECONDS")
 }
 
-func TestNetSink_SendBatch_Error(t *testing.T) {
+func TestSendBatch_Error(t *testing.T) {
 	netSink, mockedConn := newErrorSink(1)
 
 	batch := []bytes.Buffer{
