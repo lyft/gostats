@@ -297,7 +297,7 @@ func (s *netSink) run() {
 		// writeToConn will set s.conn to nil on error, try to reconnect
 		if s.conn == nil {
 			// connect to statsd server
-			// the connection will be persisted unless an error occurs. thereby with batching is used the entire batch will be streamed under 1 connection
+			// the connection will be persisted unless an error occurs. thereby when batching is used the entire batch will be streamed under 1 connection
 			if err := s.connect(addr); err != nil {
 				s.log.Warnf("connection error: %s", err)
 
@@ -324,7 +324,7 @@ func (s *netSink) run() {
 				s.mu.Unlock()
 			}
 			putBuffer(buf)
-			continue // if error we may need to reconnect so go back to the top of the next iteration
+			continue // we will need to reconnect if an error occurs, so go back to the top of the next iteration to see
 		default:
 			// Drop through in case retryc has nothing.
 		}
@@ -354,8 +354,8 @@ func (s *netSink) run() {
 				} else {
 					batchInterval = time.After(batchTimeout)
 				}
-
 			default:
+				// No need to block here, drop through check again in the next t.C interval
 			}
 		// drain all outc data. either batch or send immediatedly
 		case done := <-s.doFlush:
