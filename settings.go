@@ -20,8 +20,12 @@ const (
 	DefaultFlushIntervalS = 5
 	// DefaultLoggingSinkDisabled is the default behavior of logging sink suppression, default is false.
 	DefaultLoggingSinkDisabled = false
-	// DefaultBatchSize is the default maximum amount of stats we batch before sending, default is 0 which disables batching.
-	DefaultBatchSize = 0
+	// DefaultBatchEnabled indicates whether batching should be enabled be default, batching is disabled by default.
+	DefaultBatchEnabled = false
+	// DefaultBatchSize is the default maximum number of stats to batch before sending, when batching is enabled.
+	DefaultBatchSize = 100
+	// DefaultBatchSendIntervalS is the default timeout to send the batch when batching is enabled, default is 5 to interleave DefaultFlushIntervalS.
+	DefaultBatchSendIntervalS = 5
 )
 
 // The Settings type is used to configure gostats. gostats uses environment
@@ -40,8 +44,15 @@ type Settings struct {
 	// Disable the LoggingSink when USE_STATSD is false and use the NullSink instead.
 	// This will cause all stats to be silently dropped.
 	LoggingSinkDisabled bool `envconfig:"GOSTATS_LOGGING_SINK_DISABLED" default:"false"`
-	// Max stats we batch before sending. 0 is disabled.
-	BatchSize int `envconfig:"GOSTATS_BATCH_SIZE" default:"0"`
+	// Enable batching stats to reduce intermittent sends.
+	BatchEnabled bool `envconfig:"GOSTATS_BATCH_ENABLED" default:"false"`
+	// Maximum number of stats to batch before sending.
+	// For UDP, despite this configuration, stats will naturally be distributed over multiple packets, single stats are guarenteed to fit in 1 packet but we will still fragment the batch.
+	// Depends on BatchEnabled.
+	BatchSize int `envconfig:"GOSTATS_BATCH_SIZE" default:"100"`
+	// Fallback timeout to send the batch.
+	// Depends on BatchEnabled.
+	BatchSendIntervalS int `envconfig:"GOSTATS_BATCH_SEND_INTERVAL_SECONDS" default:"5"`
 }
 
 // An envError is an error that occurred parsing an environment variable
@@ -105,7 +116,15 @@ func GetSettings() Settings {
 	if err != nil {
 		panic(err)
 	}
+	batchEnabled, err := envBool("GOSTATS_BATCH_ENABLED", DefaultBatchEnabled)
+	if err != nil {
+		panic(err)
+	}
 	batchSize, err := envInt("GOSTATS_BATCH_SIZE", DefaultBatchSize)
+	if err != nil {
+		panic(err)
+	}
+	batchSendIntervalS, err := envInt("GOSTATS_BATCH_SEND_INTERVAL_SECONDS", DefaultBatchSendIntervalS)
 	if err != nil {
 		panic(err)
 	}
@@ -116,7 +135,9 @@ func GetSettings() Settings {
 		StatsdPort:          statsdPort,
 		FlushIntervalS:      flushIntervalS,
 		LoggingSinkDisabled: loggingSinkDisabled,
+		BatchEnabled:        batchEnabled,
 		BatchSize:           batchSize,
+		BatchSendIntervalS:  batchSendIntervalS,
 	}
 }
 

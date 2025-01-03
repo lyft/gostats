@@ -46,6 +46,9 @@ func TestSettingsCompat(t *testing.T) {
 		"STATSD_PORT", "",
 		"GOSTATS_FLUSH_INTERVAL_SECONDS", "",
 		"GOSTATS_LOGGING_SINK_DISABLED", "",
+		"GOSTATS_BATCH_ENABLED", "",
+		"GOSTATS_BATCH_SIZE", "",
+		"GOSTATS_BATCH_SEND_INTERVAL_SECONDS", "",
 	)
 	defer reset()
 
@@ -68,6 +71,9 @@ func TestSettingsDefault(t *testing.T) {
 		"STATSD_PORT", "",
 		"GOSTATS_FLUSH_INTERVAL_SECONDS", "",
 		"GOSTATS_LOGGING_SINK_DISABLED", "",
+		"GOSTATS_BATCH_ENABLED", "",
+		"GOSTATS_BATCH_SIZE", "",
+		"GOSTATS_BATCH_SEND_INTERVAL_SECONDS", "",
 	)
 	defer reset()
 	exp := Settings{
@@ -77,6 +83,9 @@ func TestSettingsDefault(t *testing.T) {
 		StatsdPort:          DefaultStatsdPort,
 		FlushIntervalS:      DefaultFlushIntervalS,
 		LoggingSinkDisabled: DefaultLoggingSinkDisabled,
+		BatchEnabled:        DefaultBatchEnabled,
+		BatchSize:           DefaultBatchSize,
+		BatchSendIntervalS:  DefaultBatchSendIntervalS,
 	}
 	settings := GetSettings()
 	if exp != settings {
@@ -92,6 +101,9 @@ func TestSettingsOverride(t *testing.T) {
 		"STATSD_PORT", "1234",
 		"GOSTATS_FLUSH_INTERVAL_SECONDS", "3",
 		"GOSTATS_LOGGING_SINK_DISABLED", "true",
+		"GOSTATS_BATCH_ENABLED", "true",
+		"GOSTATS_BATCH_SIZE", "200",
+		"GOSTATS_BATCH_SEND_INTERVAL_SECONDS", "10",
 	)
 	defer reset()
 	exp := Settings{
@@ -101,6 +113,9 @@ func TestSettingsOverride(t *testing.T) {
 		StatsdPort:          1234,
 		FlushIntervalS:      3,
 		LoggingSinkDisabled: true,
+		BatchEnabled:        true,
+		BatchSize:           200,
+		BatchSendIntervalS:  10,
 	}
 	settings := GetSettings()
 	if exp != settings {
@@ -112,10 +127,13 @@ func TestSettingsErrors(t *testing.T) {
 	// STATSD_HOST doesn't error so we don't check it
 
 	tests := map[string]string{
-		"USE_STATSD":                     "FOO!",
-		"STATSD_PORT":                    "not-an-int",
-		"GOSTATS_FLUSH_INTERVAL_SECONDS": "true",
-		"GOSTATS_LOGGING_SINK_DISABLED":  "1337",
+		"USE_STATSD":                          "FOO!",
+		"STATSD_PORT":                         "not-an-int",
+		"GOSTATS_FLUSH_INTERVAL_SECONDS":      "true",
+		"GOSTATS_LOGGING_SINK_DISABLED":       "1337",
+		"GOSTATS_BATCH_ENABLED":               "2",
+		"GOSTATS_BATCH_SIZE":                  "true",
+		"GOSTATS_BATCH_SEND_INTERVAL_SECONDS": "false",
 	}
 	for key, val := range tests {
 		t.Run(key, func(t *testing.T) {

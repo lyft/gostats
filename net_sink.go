@@ -109,8 +109,7 @@ func NewNetSink(opts ...SinkOption) FlushableSink {
 	}
 
 	// Calculate buffer size based on protocol, for UDP we want to pick a
-	// buffer size that will prevent datagram fragmentation.
-	// todo: for batching does the batch size need to be a multiple of the buffer size to prevent fragmentation?
+	// buffer size that will prevent datagram fragmentation of a single stat.
 	var bufSize int
 	switch s.conf.StatsdProtocol {
 	case "udp", "udp4", "udp6":
@@ -119,8 +118,8 @@ func NewNetSink(opts ...SinkOption) FlushableSink {
 		bufSize = defaultBufferSizeTCP
 	}
 
-	s.outc = make(chan *bytes.Buffer, approxMaxMemBytes/bufSize)
-	s.retryc = make(chan *bytes.Buffer, 1) // It should be okay to limit this given once we write to the retry channel we break the connection, and in subsequent processing we preferentially process from this over outc.
+	s.outc = make(chan *bytes.Buffer, approxMaxMemBytes/bufSize) // this will reduce the maximum number stats we send when draining/sending pending buffers (doFlush) but won't limit batched sends in the same way
+	s.retryc = make(chan *bytes.Buffer, 1)                       // It should be okay to limit this given once we write to the retry channel we break the connection, and in subsequent processing we preferentially process from this over outc.
 
 	writer := &sinkWriter{outc: s.outc}
 	s.bufWriter = bufio.NewWriterSize(writer, bufSize)
@@ -279,14 +278,15 @@ func (s *netSink) run() {
 
 	var reconnectFailed bool // true if last reconnect failed
 
-	settings := GetSettings()
+	isBatchEnabled := s.conf.BatchEnabled
 
-	batchSize := settings.BatchSize
-	isBatchEnabled := batchSize > 0
-	batch := make([]bytes.Buffer, 0, batchSize+cap(s.outc)) // overallocate to consider draining all outc data. despite the expanded allocation, batchSize is still used to determine if we send the batched stats
-	sendBatch := false
-	batchTimeout := time.Duration(settings.FlushIntervalS) * time.Second // todo: is there any need to use a new configuration for this?
+	batchSize := s.conf.BatchSize
+	batch := make([]bytes.Buffer, 0, batchSize+cap(s.outc)) // overallocate to consider draining outstanding outc data. despite the expanded allocation, batchSize is still used to determine if we send the batched stats
+
+	batchTimeout := time.Duration(s.conf.BatchSendIntervalS) * time.Second
 	batchInterval := time.After(batchTimeout)
+
+	sendBatch := false
 
 	t := time.NewTicker(flushInterval)
 	defer t.Stop()
