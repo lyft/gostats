@@ -281,25 +281,29 @@ func (s *netSink) run() {
 	t := time.NewTicker(flushInterval)
 	defer t.Stop()
 
-	isBatchEnabled := s.conf.BatchEnabled
+	var sender sender
 
-	batchSize := s.conf.BatchSize
-	batch := make([]bytes.Buffer, 0, batchSize+cap(s.outc)) // overallocate to consider draining outstanding outc data
-	var batchInterval *time.Ticker
-	var doSendBatch bool
-
-	if isBatchEnabled {
-		batchInterval = time.NewTicker(time.Duration(s.conf.BatchSendIntervalS) * time.Second)
+	if s.conf.BatchEnabled {
+		batchInterval := time.NewTicker(time.Duration(s.conf.BatchSendIntervalS) * time.Second)
+		batchSize := s.conf.BatchSize
+		// send every batchInterval or if the batch is full
+		sender = &batchSender{
+			sink:          s,
+			batch:         make([]bytes.Buffer, 0, batchSize+cap(s.outc)), // overallocate to consider draining outstanding outc data
+			batchSize:     batchSize,
+			batchInterval: batchInterval,
+			doSendBatch:   false,
+		}
 		defer batchInterval.Stop()
+
+	} else {
+		// send anytime outc data and/or indicated by doFlush
+		sender = &genericSender{sink: s}
 	}
 
 	// outc send loop
 	// auto-flushes any/all buffered stats (on specified ticker) to outc
-	// with batching: sends every batchInterval or if the batch is full
-	// without batching: send anytime outc data and/or indicated by doFlush
 	for {
-		doSendBatch = doSendBatch || (isBatchEnabled && len(batch) >= batchSize)
-
 		// writeToConn will set s.conn to nil on error, try to reconnect
 		if s.conn == nil {
 			// connect to statsd server
@@ -335,61 +339,26 @@ func (s *netSink) run() {
 			// Drop through in case retryc has nothing.
 		}
 
-		// send batched outc data anytime indicated or the batch is full
-		if doSendBatch {
-			var err error
-			batch, err = s.sendBatch(batch)
-			if err != nil {
-				continue // cut the iteration to process retry (s.conn will be nil anyway). doSendBatch will still be true
-			}
-			doSendBatch = false
+		// for non-batching: always nil using genericSender
+		if err := sender.processBatch(); err != nil {
+			continue // if we're here assume an error occured and the batch hasn't finished sending, in this case s.conn is probably nil and we have a stat to retry. cut the iteration to the top
 		}
 
 		select {
 		// flush buffer to outc
 		// from a higher level, stats are written to s.bufWriter.buf at GOSTATS_FLUSH_INTERVAL_SECONDS (or adhoc for Timers). this flushes them to outc every t.C tick
-		// with batching: additionallity check if the we have anything to send in the batch interval
+		// for batching: also check if we want to send the batch
 		case <-t.C:
 			s.flush() // if outc is or becomes full the sinkWriter will error and we will gracefully drop the remainding buffered stats
-
-			if isBatchEnabled {
-				select {
-				case <-batchInterval.C:
-					doSendBatch = len(batch) > 0
-				default:
-					// No need to block here, drop through check again in the next t.C interval
-				}
-			}
-		// drain all outc data
+			sender.scheduleBatch()
 		case done := <-s.doFlush:
 			n := len(s.outc) // Only flush pending buffers, this prevents an issue where continuous writes prevent the flush loop from exiting.
-
-			if isBatchEnabled {
-				for i := 0; i < n && s.conn != nil; i++ {
-					buf := <-s.outc
-					batch = append(batch, *buf)
-				}
-			} else {
-				for i := 0; i < n && s.conn != nil; i++ {
-					buf := <-s.outc
-					if err := s.send(buf); err == nil {
-						putBuffer(buf)
-					}
-					// if an error occurs we send the metric to the retry channel and make s.conn nil, breaking this loop
-				}
-			}
-
+			sender.processBuffersThroughChannel(n, s.outc)
 			close(done)
-		// drain one stat from outc if avaible
 		case buf := <-s.outc:
-			if isBatchEnabled {
-				batch = append(batch, *buf)
-			} else {
-				if err := s.send(buf); err == nil {
-					putBuffer(buf)
-				}
-			}
+			sender.processBuffer(buf)
 		}
+
 	}
 }
 
@@ -443,6 +412,83 @@ func (s *netSink) connect(address string) error {
 		s.conn = conn
 	}
 	return err
+}
+
+type sender interface {
+	processBatch() error
+	scheduleBatch()
+	processBuffersThroughChannel(int, <-chan *bytes.Buffer)
+	processBuffer(*bytes.Buffer)
+}
+
+type genericSender struct {
+	sink *netSink
+}
+
+func (gs *genericSender) processBatch() error {
+	return nil
+}
+
+func (gs *genericSender) scheduleBatch() {}
+
+func (gs *genericSender) processBuffersThroughChannel(n int, outc <-chan *bytes.Buffer) {
+	// drain all outc data and send
+	for i := 0; i < n && gs.sink.conn != nil; i++ {
+		buf := <-outc
+		if err := gs.sink.send(buf); err == nil {
+			putBuffer(buf)
+		}
+		// if an error occurs we send the metric to the retry channel and make s.conn nil, breaking this loop
+	}
+}
+
+func (gs *genericSender) processBuffer(buf *bytes.Buffer) {
+	// send stat
+	if err := gs.sink.send(buf); err == nil {
+		putBuffer(buf)
+	}
+}
+
+type batchSender struct {
+	sink          *netSink
+	batch         []bytes.Buffer
+	batchSize     int
+	batchInterval *time.Ticker
+	doSendBatch   bool
+}
+
+func (bs *batchSender) processBatch() error {
+	var err error
+
+	// send batched outc data anytime indicated or the batch is full
+	if bs.doSendBatch = bs.doSendBatch || len(bs.batch) >= bs.batchSize; bs.doSendBatch {
+		bs.batch, err = bs.sink.sendBatch(bs.batch)
+		bs.doSendBatch = err == nil
+	}
+
+	return err
+}
+
+func (bs *batchSender) scheduleBatch() {
+	select {
+	case <-bs.batchInterval.C:
+		bs.doSendBatch = len(bs.batch) > 0
+	default:
+		// No need to block here, drop through check again when called in the future
+	}
+}
+
+func (bs *batchSender) processBuffersThroughChannel(n int, outc <-chan *bytes.Buffer) {
+	// drain all outc data to batch
+	for i := 0; i < n; i++ {
+		buf := <-outc
+		bs.batch = append(bs.batch, *buf)
+	}
+}
+
+func (bs *batchSender) processBuffer(buf *bytes.Buffer) {
+	// add stat to batch
+	bs.batch = append(bs.batch, *buf)
 }
 
 var bufferPool sync.Pool
