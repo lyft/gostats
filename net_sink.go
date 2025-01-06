@@ -341,7 +341,7 @@ func (s *netSink) run() {
 
 		// for non-batching: always nil using genericSender
 		if err := sender.processBatch(); err != nil {
-			continue // if we're here assume an error occured and the batch hasn't finished sending, in this case s.conn is probably nil and we have a stat to retry. cut the iteration to the top
+			continue // if we're here assume an error occurred and the batch hasn't finished sending, in this case s.conn is probably nil and we have a stat to retry. cut the iteration to the top
 		}
 
 		select {
