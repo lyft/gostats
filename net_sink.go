@@ -286,7 +286,7 @@ func (s *netSink) run() {
 	batchTimeout := time.Duration(s.conf.BatchSendIntervalS) * time.Second
 	batchInterval := time.After(batchTimeout)
 
-	sendBatch := false
+	doSendBatch := false
 
 	t := time.NewTicker(flushInterval)
 	defer t.Stop()
@@ -330,14 +330,14 @@ func (s *netSink) run() {
 		}
 
 		// send batched outc data anytime indicated or the batch is full
-		if sendBatch || len(batch) >= batchSize {
+		if doSendBatch || len(batch) >= batchSize {
 			var err error
 			batch, err = s.sendBatch(batch)
 			if err != nil {
-				sendBatch = true // indicate to continue sending out the batch in the next iterration if any erros occur (needed if entering from len(batch) >= batchSize)
-				continue         // cut the iteration to process retry (s.conn will be nil anyway)
+				doSendBatch = true // indicate to continue sending out the batch in the next iterration if any erros occur (needed if entering from len(batch) >= batchSize)
+				continue           // cut the iteration to process retry (s.conn will be nil anyway)
 			}
-			sendBatch = false
+			doSendBatch = false
 			batchInterval = time.After(batchTimeout)
 		}
 
@@ -350,7 +350,7 @@ func (s *netSink) run() {
 			select {
 			case <-batchInterval:
 				if len(batch) > 0 {
-					sendBatch = true
+					doSendBatch = true
 				} else {
 					batchInterval = time.After(batchTimeout)
 				}
@@ -365,7 +365,7 @@ func (s *netSink) run() {
 					buf := <-s.outc
 					batch = append(batch, *buf)
 				}
-				sendBatch = true // indicate batched outc data to be sent in the next iteration
+				doSendBatch = true // indicate batched outc data to be sent in the next iteration
 			} else {
 				n := len(s.outc) // Only flush pending buffers, this prevents an issue where continuous writes prevent the flush loop from exiting.
 				for i := 0; i < n && s.conn != nil; i++ {
