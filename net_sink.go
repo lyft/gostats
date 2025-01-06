@@ -278,26 +278,32 @@ func (s *netSink) run() {
 
 	var reconnectFailed bool // true if last reconnect failed
 
-	isBatchEnabled := s.conf.BatchEnabled
-
-	batchSize := s.conf.BatchSize
-	batch := make([]bytes.Buffer, 0, batchSize+cap(s.outc)) // overallocate to consider draining outstanding outc data. despite the expanded allocation, batchSize is still used to determine if we send the batched stats
-
-	batchTimeout := time.Duration(s.conf.BatchSendIntervalS) * time.Second
-	batchInterval := time.After(batchTimeout)
-
-	doSendBatch := false
-
 	t := time.NewTicker(flushInterval)
 	defer t.Stop()
 
-	// outc send loop (if batching is enabled, send every batchTimeout, if indicated by doFlush, or if the batch is full)
+	isBatchEnabled := s.conf.BatchEnabled
+
+	batchSize := s.conf.BatchSize
+	batch := make([]bytes.Buffer, 0, batchSize+cap(s.outc)) // overallocate to consider draining outstanding outc data
+	var batchInterval *time.Ticker
+	var doSendBatch bool
+
+	if isBatchEnabled {
+		batchInterval = time.NewTicker(time.Duration(s.conf.BatchSendIntervalS) * time.Second)
+		defer batchInterval.Stop()
+	}
+
+	// outc send loop
 	// auto-flushes any/all buffered stats (on specified ticker) to outc
+	// with batching: sends every batchInterval or if the batch is full
+	// without batching: send anytime outc data and/or indicated by doFlush
 	for {
+		doSendBatch = doSendBatch || (isBatchEnabled && len(batch) >= batchSize)
+
 		// writeToConn will set s.conn to nil on error, try to reconnect
 		if s.conn == nil {
 			// connect to statsd server
-			// the connection will be persisted unless an error occurs. thereby when batching is used the entire batch will be streamed under 1 connection
+			// the connection will be persisted unless an error occurs. when batching is used the entire batch should be streamed under 1 connection
 			if err := s.connect(addr); err != nil {
 				s.log.Warnf("connection error: %s", err)
 
@@ -330,63 +336,58 @@ func (s *netSink) run() {
 		}
 
 		// send batched outc data anytime indicated or the batch is full
-		if doSendBatch || len(batch) >= batchSize {
+		if doSendBatch {
 			var err error
 			batch, err = s.sendBatch(batch)
 			if err != nil {
-				doSendBatch = true // indicate to continue sending out the batch in the next iterration if any erros occur (needed if entering from len(batch) >= batchSize)
-				continue           // cut the iteration to process retry (s.conn will be nil anyway)
+				continue // cut the iteration to process retry (s.conn will be nil anyway). doSendBatch will still be true
 			}
 			doSendBatch = false
-			batchInterval = time.After(batchTimeout)
 		}
 
 		select {
 		// flush buffer to outc
 		// from a higher level, stats are written to s.bufWriter.buf at GOSTATS_FLUSH_INTERVAL_SECONDS (or adhoc for Timers). this flushes them to outc every t.C tick
+		// with batching: additionallity check if the we have anything to send in the batch interval
 		case <-t.C:
 			s.flush() // if outc is or becomes full the sinkWriter will error and we will gracefully drop the remainding buffered stats
 
-			select {
-			case <-batchInterval:
-				if len(batch) > 0 {
-					doSendBatch = true
-				} else {
-					batchInterval = time.After(batchTimeout)
-				}
-			default:
-				// No need to block here, drop through check again in the next t.C interval
-			}
-		// drain all outc data. either batch or send immediatedly
-		case done := <-s.doFlush:
 			if isBatchEnabled {
-				n := len(s.outc)
+				select {
+				case <-batchInterval.C:
+					doSendBatch = len(batch) > 0
+				default:
+					// No need to block here, drop through check again in the next t.C interval
+				}
+			}
+		// drain all outc data
+		case done := <-s.doFlush:
+			n := len(s.outc) // Only flush pending buffers, this prevents an issue where continuous writes prevent the flush loop from exiting.
+
+			if isBatchEnabled {
 				for i := 0; i < n && s.conn != nil; i++ {
 					buf := <-s.outc
 					batch = append(batch, *buf)
 				}
-				doSendBatch = true // indicate batched outc data to be sent in the next iteration
 			} else {
-				n := len(s.outc) // Only flush pending buffers, this prevents an issue where continuous writes prevent the flush loop from exiting.
 				for i := 0; i < n && s.conn != nil; i++ {
 					buf := <-s.outc
 					if err := s.send(buf); err == nil {
 						putBuffer(buf)
 					}
-					// if an error occurs we send the metric to the retry channel and make s.conn nil, breaking this loop and preventing further batch processing in this stack
+					// if an error occurs we send the metric to the retry channel and make s.conn nil, breaking this loop
 				}
 			}
 
 			close(done)
-		// drain one stat from outc if avaible. either batch or send immediatedly
+		// drain one stat from outc if avaible
 		case buf := <-s.outc:
 			if isBatchEnabled {
 				batch = append(batch, *buf)
-				continue
-			}
-
-			if err := s.send(buf); err == nil {
-				putBuffer(buf)
+			} else {
+				if err := s.send(buf); err == nil {
+					putBuffer(buf)
+				}
 			}
 		}
 	}
@@ -417,7 +418,7 @@ func (s *netSink) sendBatch(batch []bytes.Buffer) ([]bytes.Buffer, error) {
 		err = fmt.Errorf("batch send failure, only sent %d of %d", i, n)
 	}
 
-	return batch[i:n:n], err
+	return batch[i:n:cap(batch)], err
 }
 
 // writeToConn writes the buffer to the underlying conn.  May only be called

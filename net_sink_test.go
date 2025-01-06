@@ -886,7 +886,7 @@ func TestBatchingForTCP(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to set GOSTATS_BATCH_SIZE environment variable: %s", err)
 	}
-	err = os.Setenv("GOSTATS_BATCH_SEND_INTERVAL_SECONDS", "100000") // effectively disable batch send interval
+	err = os.Setenv("GOSTATS_BATCH_SEND_INTERVAL_SECONDS", "5")
 	if err != nil {
 		t.Fatalf("Failed to set GOSTATS_BATCH_SEND_INTERVAL_SECONDS environment variable: %s", err)
 	}
@@ -901,14 +901,14 @@ func TestBatchingForTCP(t *testing.T) {
 		sink.FlushTimer("timer_int", float64(i%10))
 	}
 
-	time.Sleep(2001 * time.Millisecond)
+	sink.Flush() // force drain all remaining outc
+
+	// we send the batch ~every 5 seconds
+	time.Sleep(3001 * time.Millisecond)
 	if ts.String() != "" {
 		t.Errorf("Stats were written despite forced batching")
 	}
-
-	sink.Flush() // drain all outc and send
-
-	time.Sleep(1000 * time.Millisecond)
+	time.Sleep(3000 * time.Millisecond)
 
 	bufferSize := len(ts.String())
 	if bufferSize != expected {
@@ -929,7 +929,7 @@ func TestBatchingForUDP(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to set GOSTATS_BATCH_SIZE environment variable: %s", err)
 	}
-	err = os.Setenv("GOSTATS_BATCH_SEND_INTERVAL_SECONDS", "100000") // effectively disable batch send interval
+	err = os.Setenv("GOSTATS_BATCH_SEND_INTERVAL_SECONDS", "5")
 	if err != nil {
 		t.Fatalf("Failed to set GOSTATS_BATCH_SEND_INTERVAL_SECONDS environment variable: %s", err)
 	}
@@ -944,14 +944,14 @@ func TestBatchingForUDP(t *testing.T) {
 		sink.FlushTimer("timer_int", float64(i%10))
 	}
 
-	time.Sleep(2001 * time.Millisecond)
+	sink.Flush() // force drain all remaining outc
+
+	// we send the batch ~every 5 seconds
+	time.Sleep(3001 * time.Millisecond)
 	if ts.String() != "" {
 		t.Errorf("Stats were written despite forced batching")
 	}
-
-	sink.Flush() // drain all outc and send
-
-	time.Sleep(1000 * time.Millisecond)
+	time.Sleep(3000 * time.Millisecond)
 
 	bufferSize := len(ts.String())
 	if bufferSize != expected {
@@ -963,7 +963,7 @@ func TestBatchingForUDP(t *testing.T) {
 	os.Unsetenv("GOSTATS_BATCH_SEND_INTERVAL_SECONDS")
 }
 
-func TestBatchingAutoSendWhenBatchIsFull(t *testing.T) {
+func TestBatchingSendWhenBatchIsFull(t *testing.T) {
 	err := os.Setenv("GOSTATS_BATCH_ENABLED", "true")
 	if err != nil {
 		t.Fatalf("Failed to set GOSTATS_BATCH_ENABLED environment variable: %s", err)
@@ -986,42 +986,7 @@ func TestBatchingAutoSendWhenBatchIsFull(t *testing.T) {
 		sink.FlushTimer("timer_int", float64(i%10))
 	}
 
-	time.Sleep(2001 * time.Millisecond) // we only flush to outc ~every second but the batch will be sent ~immediately as it's always full
-
-	bufferSize := len(ts.String())
-	if bufferSize != expected {
-		t.Errorf("Not all stats were written\ngot buffer size:\n%d\nwanted:\n%d\n", bufferSize, expected)
-	}
-
-	os.Unsetenv("GOSTATS_BATCH_ENABLED")
-	os.Unsetenv("GOSTATS_BATCH_SIZE")
-	os.Unsetenv("GOSTATS_BATCH_SEND_INTERVAL_SECONDS")
-}
-
-func TestBatchingAutoSendOnInterval(t *testing.T) {
-	err := os.Setenv("GOSTATS_BATCH_ENABLED", "true")
-	if err != nil {
-		t.Fatalf("Failed to set GOSTATS_BATCH_ENABLED environment variable: %s", err)
-	}
-	err = os.Setenv("GOSTATS_BATCH_SIZE", "10000")
-	if err != nil {
-		t.Fatalf("Failed to set GOSTATS_BATCH_SIZE environment variable: %s", err)
-	}
-	err = os.Setenv("GOSTATS_BATCH_SEND_INTERVAL_SECONDS", "2") // effectively disable batch send interval
-	if err != nil {
-		t.Fatalf("Failed to set GOSTATS_BATCH_SEND_INTERVAL_SECONDS environment variable: %s", err)
-	}
-
-	expected := 3840
-
-	ts, sink := setupTestNetSink(t, "tcp", false)
-	defer ts.Close()
-
-	for i := 0; i < 256; i++ {
-		sink.FlushTimer("timer_int", float64(i%10))
-	}
-
-	time.Sleep(3001 * time.Millisecond) // we only flush to outc ~every second and send the batch ~every 2 seconds
+	time.Sleep(2001 * time.Millisecond) // we flush to outc ~every second but the batch will be sent ~immediately as it's always full
 
 	bufferSize := len(ts.String())
 	if bufferSize != expected {
