@@ -276,8 +276,6 @@ func (s *netSink) FlushTimer(name string, value float64) {
 func (s *netSink) run() {
 	addr := net.JoinHostPort(s.conf.StatsdHost, strconv.Itoa(s.conf.StatsdPort))
 
-	var reconnectFailed bool // true if last reconnect failed
-
 	t := time.NewTicker(flushInterval)
 	defer t.Stop()
 
@@ -288,7 +286,11 @@ func (s *netSink) run() {
 		batchSize := s.conf.BatchSize
 		// send every batchInterval or if the batch is full
 		sender = &batchSender{
-			sink:          s,
+			genericSender: genericSender{
+				sink:            s,
+				address:         addr,
+				reconnectFailed: false,
+			},
 			batch:         make([]bytes.Buffer, 0, batchSize+cap(s.outc)), // overallocate to consider draining outstanding outc data
 			batchSize:     batchSize,
 			batchInterval: batchInterval,
@@ -298,50 +300,25 @@ func (s *netSink) run() {
 
 	} else {
 		// send anytime outc data and/or indicated by doFlush
-		sender = &genericSender{sink: s}
+		sender = &genericSender{
+			sink:            s,
+			address:         addr,
+			reconnectFailed: false,
+		}
 	}
 
 	// outc send loop
 	// auto-flushes any/all buffered stats (on specified ticker) to outc
 	for {
-		// writeToConn will set s.conn to nil on error, try to reconnect
-		if s.conn == nil {
-			// connect to statsd server
-			// the connection will be persisted unless an error occurs. when batching is used the entire batch should be streamed under 1 connection
-			if err := s.connect(addr); err != nil {
-				s.log.Warnf("connection error: %s", err)
-
-				// If the previous reconnect attempt failed, drain the flush
-				// queue to prevent Flush() from blocking indefinitely.
-				if reconnectFailed {
-					s.drainFlushQueue()
-				}
-				reconnectFailed = true
-
+		// during init we should create a connection and process retries, when batching is used the entire batch should be streamed under 1 connection
+		// additionally for batching: send the batch if needed
+		if connected, err := sender.init(); err != nil {
+			// if we're here assume an error occurred, in this case s.conn is probably nil and we have a stat to retry. cut the iteration to the top and try again
+			if !connected {
 				// TODO (CEV): don't sleep on the first retry
 				time.Sleep(defaultRetryInterval)
-				continue
 			}
-			reconnectFailed = false
-		}
-
-		// Drain all retries first and continue loop if there are multiple things to retry
-		select {
-		case buf := <-s.retryc:
-			if err := s.writeToConn(buf); err != nil {
-				s.mu.Lock()
-				s.handleFlushErrorSize(err, buf.Len())
-				s.mu.Unlock()
-			}
-			putBuffer(buf)
-			continue // we will need to reconnect if an error occurs, so go back to the top of the next iteration to see
-		default:
-			// Drop through in case retryc has nothing.
-		}
-
-		// for non-batching: always nil using genericSender
-		if err := sender.processBatch(); err != nil {
-			continue // if we're here assume an error occurred and the batch hasn't finished sending, in this case s.conn is probably nil and we have a stat to retry. cut the iteration to the top
+			continue
 		}
 
 		select {
@@ -350,7 +327,7 @@ func (s *netSink) run() {
 		// for batching: also check if we want to send the batch
 		case <-t.C:
 			s.flush() // if outc is or becomes full the sinkWriter will error and we will gracefully drop the remainding buffered stats
-			sender.scheduleBatch()
+			sender.scheduleSend()
 		case done := <-s.doFlush:
 			n := len(s.outc) // Only flush pending buffers, this prevents an issue where continuous writes prevent the flush loop from exiting.
 			sender.processBuffersThroughChannel(n, s.outc)
@@ -400,7 +377,7 @@ func (s *netSink) writeToConn(buf *bytes.Buffer) error {
 
 	if err != nil {
 		_ = s.conn.Close()
-		s.conn = nil // this will break the loop
+		s.conn = nil
 	}
 	return err
 }
@@ -415,21 +392,43 @@ func (s *netSink) connect(address string) error {
 }
 
 type sender interface {
-	processBatch() error
-	scheduleBatch()
+	init() (bool, error)
+	scheduleSend()
 	processBuffersThroughChannel(int, <-chan *bytes.Buffer)
 	processBuffer(*bytes.Buffer)
 }
 
 type genericSender struct {
-	sink *netSink
+	sink            *netSink
+	address         string
+	reconnectFailed bool
 }
 
-func (gs *genericSender) processBatch() error {
-	return nil
+func (gs *genericSender) init() (bool, error) {
+	// upon error s.conn should become nil, try to reconnect if needed
+	if err := connectSender(gs.sink, gs.address, gs.reconnectFailed); err != nil {
+		gs.reconnectFailed = true
+		return false, err
+	}
+
+	select {
+	case buf := <-gs.sink.retryc:
+		var err error
+		if err = gs.sink.writeToConn(buf); err != nil {
+			gs.sink.mu.Lock()
+			gs.sink.handleFlushErrorSize(err, buf.Len())
+			gs.sink.mu.Unlock()
+		}
+		putBuffer(buf)
+		return true, err // return with error to be called again to drain all retires
+	default:
+		// Drop through in case retryc has nothing.
+	}
+
+	return true, nil
 }
 
-func (gs *genericSender) scheduleBatch() {}
+func (gs *genericSender) scheduleSend() {}
 
 func (gs *genericSender) processBuffersThroughChannel(n int, outc <-chan *bytes.Buffer) {
 	// drain all outc data and send
@@ -450,26 +449,51 @@ func (gs *genericSender) processBuffer(buf *bytes.Buffer) {
 }
 
 type batchSender struct {
-	sink          *netSink
+	genericSender
 	batch         []bytes.Buffer
 	batchSize     int
 	batchInterval *time.Ticker
 	doSendBatch   bool
 }
 
-func (bs *batchSender) processBatch() error {
-	var err error
+func (bs *batchSender) init() (bool, error) {
+	select {
+	case buf := <-bs.sink.retryc:
+		// upon error s.conn should become nil, try to reconnect if needed
+		if err := connectSender(bs.sink, bs.address, bs.reconnectFailed); err != nil {
+			bs.reconnectFailed = true
+			return false, err
+		}
 
+		var err error
+		if err = bs.sink.writeToConn(buf); err != nil {
+			bs.sink.mu.Lock()
+			bs.sink.handleFlushErrorSize(err, buf.Len())
+			bs.sink.mu.Unlock()
+		}
+		putBuffer(buf)
+		return true, err // return with error to be called again to drain all retires
+	default:
+		// Drop through in case retryc has nothing.
+	}
+
+	var err error
 	// send batched outc data anytime indicated or the batch is full
 	if bs.doSendBatch = bs.doSendBatch || len(bs.batch) >= bs.batchSize; bs.doSendBatch {
+		// upon error s.conn should become nil, try to reconnect if needed
+		if err := connectSender(bs.sink, bs.address, bs.reconnectFailed); err != nil {
+			bs.reconnectFailed = true
+			return false, err
+		}
+
 		bs.batch, err = bs.sink.sendBatch(bs.batch)
 		bs.doSendBatch = err == nil
 	}
 
-	return err
+	return true, err
 }
 
-func (bs *batchSender) scheduleBatch() {
+func (bs *batchSender) scheduleSend() {
 	select {
 	case <-bs.batchInterval.C:
 		bs.doSendBatch = len(bs.batch) > 0
@@ -489,6 +513,26 @@ func (bs *batchSender) processBuffersThroughChannel(n int, outc <-chan *bytes.Bu
 func (bs *batchSender) processBuffer(buf *bytes.Buffer) {
 	// add stat to batch
 	bs.batch = append(bs.batch, *buf)
+}
+
+func connectSender(sink *netSink, address string, previousFailure bool) error {
+	if sink.conn == nil {
+		// connect to statsd server
+		// the connection will be persisted unless an error occurs
+		if err := sink.connect(address); err != nil {
+			sink.log.Warnf("connection error: %s", err)
+
+			// If the previous reconnect attempt failed, drain the flush
+			// queue to prevent Flush() from blocking indefinitely.
+			if previousFailure {
+				sink.drainFlushQueue()
+			}
+
+			return err
+		}
+	}
+
+	return nil
 }
 
 var bufferPool sync.Pool
