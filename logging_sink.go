@@ -1,12 +1,13 @@
 package stats
 
 import (
-	"encoding/json"
 	"fmt"
 	"io"
 	"os"
 	"strconv"
 	"time"
+
+	"github.com/json-iterator/go"
 )
 
 type loggingSink struct {
@@ -54,7 +55,7 @@ var emptyMap = map[string]string{}
 func (s *loggingSink) logMessage(level string, msg string) {
 	nanos := s.now().UnixNano()
 	sec := sixDecimalPlacesFloat(float64(nanos) / float64(time.Second))
-	enc := json.NewEncoder(s.writer)
+	enc := jsoniter.NewEncoder(s.writer)
 	enc.Encode(logLine{
 		Message:   msg,
 		Level:     level,
@@ -69,7 +70,7 @@ func (s *loggingSink) logMessage(level string, msg string) {
 func (s *loggingSink) log(name, typ string, value float64) {
 	nanos := s.now().UnixNano()
 	sec := sixDecimalPlacesFloat(float64(nanos) / float64(time.Second))
-	enc := json.NewEncoder(s.writer)
+	enc := jsoniter.NewEncoder(s.writer)
 	kv := map[string]string{
 		"type":  typ,
 		"value": fmt.Sprintf("%f", value),

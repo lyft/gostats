@@ -1,6 +1,10 @@
 package stats
 
-import "sync"
+import (
+	"sync"
+
+	"github.com/lyft/gostats/mock"
+)
 
 // MockSink describes an in-memory Sink used for testing.
 //
@@ -48,4 +52,10 @@ func (m *MockSink) FlushTimer(name string, value float64) { //nolint:revive
 	m.tLock.Lock()
 	defer m.tLock.Unlock()
 	m.Timers[name]++
+}
+
+// NewMockSink returns a new Sink which implements the stats.Sink interface and is
+// suitable for testing.
+func NewMockSink() *mock.Sink {
+	return mock.NewSink()
 }

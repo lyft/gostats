@@ -3,7 +3,6 @@ package tags
 import (
 	"sort"
 	"strings"
-	"unsafe"
 )
 
 // A Tag is a Key/Value statsd tag.
@@ -319,16 +318,16 @@ func (t TagSet) Serialize(name string) string {
 		n += len(p.Key) + len(p.Value)
 	}
 
-	// CEV: this is same as strings.Builder, but is faster and simpler.
-	b := make([]byte, 0, n)
-	b = append(b, name...)
+	var b strings.Builder
+	b.Grow(n)
+	b.WriteString(name)
 	for _, p := range t {
-		b = append(b, prefix...)
-		b = append(b, p.Key...)
-		b = append(b, sep...)
-		b = append(b, p.Value...)
+		b.WriteString(prefix)
+		b.WriteString(p.Key)
+		b.WriteString(sep)
+		b.WriteString(p.Value)
 	}
-	return *(*string)(unsafe.Pointer(&b))
+	return b.String()
 }
 
 // SerializeTags serializes name and tags into a statsd stat.
@@ -437,35 +436,31 @@ func SerializeTags(name string, tags map[string]string) string {
 		}
 		sort.Sort(pairs)
 
-		// CEV: this is same as strings.Builder, but works with go1.9 and earlier
-		b := make([]byte, 0, n)
-		b = append(b, name...)
+		var b strings.Builder
+		b.Grow(n)
+		b.WriteString(name)
 		for _, tag := range pairs {
-			b = append(b, prefix...)
-			b = append(b, tag.Key...)
-			b = append(b, sep...)
-			b = append(b, tag.Value...)
+			b.WriteString(prefix)
+			b.WriteString(tag.Key)
+			b.WriteString(sep)
+			b.WriteString(tag.Value)
 		}
-		return *(*string)(unsafe.Pointer(&b))
+		return b.String()
 	}
 }
 
 // ReplaceChars replaces any invalid chars ([.:|]) in value s with '_'.
 func ReplaceChars(s string) string {
-	var buf []byte // lazily allocated
+	var buf strings.Builder
 	for i := 0; i < len(s); i++ {
 		switch s[i] {
 		case '.', ':', '|':
-			if buf == nil {
-				buf = []byte(s)
-			}
-			buf[i] = '_'
+			buf.WriteByte('_')
+		default:
+			buf.WriteByte(s[i])
 		}
 	}
-	if buf == nil {
-		return s
-	}
-	return *(*string)(unsafe.Pointer(&buf))
+	return buf.String()
 }
 
 // removeStatValue removes the value from a stat line

@@ -5,6 +5,8 @@ import (
 	"os"
 	"strconv"
 	"time"
+
+	"github.com/spf13/viper"
 )
 
 const (
@@ -26,18 +28,18 @@ const (
 // variables to setup its settings.
 type Settings struct {
 	// Use statsd as a stats sink.
-	UseStatsd bool `envconfig:"USE_STATSD" default:"true"`
+	UseStatsd bool `mapstructure:"USE_STATSD"`
 	// Address where statsd is running at.
-	StatsdHost string `envconfig:"STATSD_HOST" default:"localhost"`
+	StatsdHost string `mapstructure:"STATSD_HOST"`
 	// Network protocol used to connect to statsd
-	StatsdProtocol string `envconfig:"STATSD_PROTOCOL" default:"tcp"`
+	StatsdProtocol string `mapstructure:"STATSD_PROTOCOL"`
 	// Port where statsd is listening at.
-	StatsdPort int `envconfig:"STATSD_PORT" default:"8125"`
+	StatsdPort int `mapstructure:"STATSD_PORT"`
 	// Flushing interval.
-	FlushIntervalS int `envconfig:"GOSTATS_FLUSH_INTERVAL_SECONDS" default:"5"`
+	FlushIntervalS int `mapstructure:"GOSTATS_FLUSH_INTERVAL_SECONDS"`
 	// Disable the LoggingSink when USE_STATSD is false and use the NullSink instead.
 	// This will cause all stats to be silently dropped.
-	LoggingSinkDisabled bool `envconfig:"GOSTATS_LOGGING_SINK_DISABLED" default:"false"`
+	LoggingSinkDisabled bool `mapstructure:"GOSTATS_LOGGING_SINK_DISABLED"`
 }
 
 // An envError is an error that occurred parsing an environment variable
@@ -85,30 +87,21 @@ func envBool(key string, def bool) (bool, error) {
 
 // GetSettings returns the Settings gostats will run with.
 func GetSettings() Settings {
-	useStatsd, err := envBool("USE_STATSD", DefaultUseStatsd)
-	if err != nil {
-		panic(err)
+	viper.SetDefault("USE_STATSD", DefaultUseStatsd)
+	viper.SetDefault("STATSD_HOST", DefaultStatsdHost)
+	viper.SetDefault("STATSD_PROTOCOL", DefaultStatsdProtocol)
+	viper.SetDefault("STATSD_PORT", DefaultStatsdPort)
+	viper.SetDefault("GOSTATS_FLUSH_INTERVAL_SECONDS", DefaultFlushIntervalS)
+	viper.SetDefault("GOSTATS_LOGGING_SINK_DISABLED", DefaultLoggingSinkDisabled)
+
+	viper.AutomaticEnv()
+
+	var settings Settings
+	if err := viper.Unmarshal(&settings); err != nil {
+		panic(fmt.Errorf("unable to decode into struct, %v", err))
 	}
-	statsdPort, err := envInt("STATSD_PORT", DefaultStatsdPort)
-	if err != nil {
-		panic(err)
-	}
-	flushIntervalS, err := envInt("GOSTATS_FLUSH_INTERVAL_SECONDS", DefaultFlushIntervalS)
-	if err != nil {
-		panic(err)
-	}
-	loggingSinkDisabled, err := envBool("GOSTATS_LOGGING_SINK_DISABLED", DefaultLoggingSinkDisabled)
-	if err != nil {
-		panic(err)
-	}
-	return Settings{
-		UseStatsd:           useStatsd,
-		StatsdHost:          envOr("STATSD_HOST", DefaultStatsdHost),
-		StatsdProtocol:      envOr("STATSD_PROTOCOL", DefaultStatsdProtocol),
-		StatsdPort:          statsdPort,
-		FlushIntervalS:      flushIntervalS,
-		LoggingSinkDisabled: loggingSinkDisabled,
-	}
+
+	return settings
 }
 
 // FlushInterval returns the flush interval duration.
