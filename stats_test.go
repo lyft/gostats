@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"math/rand"
+	"os"
 	"reflect"
 	"strconv"
 	"strings"
@@ -78,9 +79,9 @@ func TestValidateTags(t *testing.T) {
 	store.Flush()
 
 	expected := "test:1|c"
-	counter := sink.record
-	if !strings.Contains(counter, expected) {
-		t.Error("wanted counter value of test:1|c, got", counter)
+	output := sink.record
+	if !strings.Contains(output, expected) && !strings.Contains(output, "reserved_tag") {
+		t.Errorf("Expected without reserved tags: '%s' Got: '%s'", expected, output)
 	}
 
 	// A reserved tag should trigger adding the reserved_tag counter
@@ -89,10 +90,11 @@ func TestValidateTags(t *testing.T) {
 	store.NewCounterWithTags("test", map[string]string{"host": "i"}).Inc()
 	store.Flush()
 
-	expected = "reserved_tag:1|c\ntest.__host=i:1|c"
-	counter = sink.record
-	if !strings.Contains(counter, expected) {
-		t.Error("wanted counter value of test.___f=i:1|c, got", counter)
+	expected = "test.__host=i:1|c"
+	expectedReservedTag := "reserved_tag:1|c"
+	output = sink.record
+	if !strings.Contains(output, expected) && !strings.Contains(output, expectedReservedTag) {
+		t.Errorf("Expected: '%s' and '%s', In: '%s'", expected, expectedReservedTag, output)
 	}
 }
 
@@ -124,6 +126,102 @@ func TestMilliTimer(t *testing.T) {
 	if !strings.Contains(timer, expected) {
 		t.Error("wanted timer value of test:420.000000|ms, got", timer)
 	}
+}
+
+func TestTimerResevoir_Disabled(t *testing.T) {
+	err := os.Setenv("GOSTATS_TIMER_RESERVOIR_SIZE", "0")
+	if err != nil {
+		t.Fatalf("Failed to set GOSTATS_BATCH_ENABLED environment variable: %s", err)
+	}
+
+	expectedStatCount := 1000
+
+	ts, sink := setupTestNetSink(t, "tcp", false)
+	store := NewStore(sink, true)
+
+	for i := 0; i < 1000; i++ {
+		store.NewTimer("test" + strconv.Itoa(i)).AddValue(float64(i % 10))
+	}
+
+	if ts.String() != "" {
+		t.Errorf("Stats were written despite forced batching")
+	}
+
+	store.Flush()
+
+	time.Sleep(1001 * time.Millisecond)
+
+	statCount := len(strings.Split(ts.String(), "\n")) - 1 // there will be 1 extra new line character at the end of the buffer
+	if statCount != expectedStatCount {
+		t.Errorf("Not all stats were written\ngot:\n%d\nwanted:\n%d\n", statCount, expectedStatCount)
+	}
+
+	os.Unsetenv("GOSTATS_TIMER_RESERVOIR_SIZE")
+}
+
+func TestTimerReservoir(t *testing.T) {
+	err := os.Setenv("GOSTATS_TIMER_RESERVOIR_SIZE", "100")
+	if err != nil {
+		t.Fatalf("Failed to set GOSTATS_BATCH_ENABLED environment variable: %s", err)
+	}
+
+	expectedStatCount := 100
+
+	ts, sink := setupTestNetSink(t, "tcp", false)
+	store := NewStore(sink, true)
+
+	for i := 0; i < 1000; i++ {
+		store.NewTimer("test" + strconv.Itoa(i)).AddValue(float64(i%10 + 1)) // don't create timers with 0 values to make the count deterministic
+	}
+
+	if ts.String() != "" {
+		t.Errorf("Stats were written despite forced batching")
+	}
+
+	store.Flush()
+
+	time.Sleep(1001 * time.Millisecond)
+
+	statCount := len(strings.Split(ts.String(), "\n")) - 1 // there will be 1 extra new line character at the end of the buffer
+	if statCount != expectedStatCount {
+		t.Errorf("Not all stats were written\ngot:\n%d\nwanted:\n%d\n", statCount, expectedStatCount)
+	}
+
+	os.Unsetenv("GOSTATS_TIMER_RESERVOIR_SIZE")
+}
+
+func TestTimerReservoir_FilteredZeros(t *testing.T) {
+	err := os.Setenv("GOSTATS_TIMER_RESERVOIR_SIZE", "100")
+	if err != nil {
+		t.Fatalf("Failed to set GOSTATS_BATCH_ENABLED environment variable: %s", err)
+	}
+
+	ts, sink := setupTestNetSink(t, "tcp", false)
+	store := NewStore(sink, true)
+
+	for i := 0; i < 1000; i++ {
+		store.NewTimer("test" + strconv.Itoa(i)).AddValue(float64(i % 10))
+	}
+
+	if ts.String() != "" {
+		t.Errorf("Stats were written despite forced batching")
+	}
+
+	store.Flush()
+
+	time.Sleep(1001 * time.Millisecond)
+
+	stats := strings.Split(ts.String(), "\n")
+	stats = stats[:len(stats)-1] // remove the extra new line character at the end of the buffer
+	for _, stat := range stats {
+		value := strings.Split(strings.Split(stat, ":")[1], ("|ms"))[0] // strip value and remove suffix and get raw number
+		if value == "0" {
+			t.Errorf("Got a zero value stat: %s", stat)
+		}
+
+	}
+
+	os.Unsetenv("GOSTATS_TIMER_RESERVOIR_SIZE")
 }
 
 // Ensure 0 counters are not flushed

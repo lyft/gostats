@@ -2,6 +2,7 @@ package stats
 
 import (
 	"context"
+	"math"
 	"strconv"
 	"sync"
 	"sync/atomic"
@@ -298,30 +299,69 @@ func (c *gauge) Value() uint64 {
 	return atomic.LoadUint64(&c.value)
 }
 
-type timer struct {
+type timer interface {
+	time(time.Duration)
+	AddDuration(time.Duration)
+	AddValue(float64)
+	AllocateSpan() Timespan
+	Value() float64
+}
+
+type standardTimer struct {
 	base time.Duration
 	name string
 	sink Sink
 }
 
-func (t *timer) time(dur time.Duration) {
+func (t *standardTimer) time(dur time.Duration) {
 	t.AddDuration(dur)
 }
 
-func (t *timer) AddDuration(dur time.Duration) {
+func (t *standardTimer) AddDuration(dur time.Duration) {
 	t.AddValue(float64(dur / t.base))
 }
 
-func (t *timer) AddValue(value float64) {
+func (t *standardTimer) AddValue(value float64) {
 	t.sink.FlushTimer(t.name, value)
 }
 
-func (t *timer) AllocateSpan() Timespan {
+func (t *standardTimer) AllocateSpan() Timespan {
 	return &timespan{timer: t, start: time.Now()}
 }
 
+func (t *standardTimer) Value() float64 {
+	return 0.0 // float zero value
+}
+
+type reservoirTimer struct {
+	base  time.Duration
+	name  string
+	value uint64
+}
+
+func (t *reservoirTimer) time(dur time.Duration) {
+	t.AddDuration(dur)
+}
+
+func (t *reservoirTimer) AddDuration(dur time.Duration) {
+	t.AddValue(float64(dur / t.base))
+}
+
+func (t *reservoirTimer) AddValue(value float64) {
+	// todo does this need to be atomtic? ideally for the the use case it won't/shouldn't be changed like a counter/gauge would be
+	atomic.StoreUint64(&t.value, math.Float64bits(value))
+}
+
+func (t *reservoirTimer) AllocateSpan() Timespan {
+	return &timespan{timer: t, start: time.Now()}
+}
+
+func (t *reservoirTimer) Value() float64 {
+	return math.Float64frombits(atomic.LoadUint64(&t.value))
+}
+
 type timespan struct {
-	timer *timer
+	timer timer
 	start time.Time
 }
 
@@ -339,6 +379,8 @@ type statStore struct {
 	counters sync.Map
 	gauges   sync.Map
 	timers   sync.Map
+
+	timerCount int
 
 	mu             sync.RWMutex
 	statGenerators []StatGenerator
@@ -392,6 +434,20 @@ func (s *statStore) Flush() {
 		s.sink.FlushGauge(key.(string), v.(*gauge).Value())
 		return true
 	})
+
+	settings := GetSettings() // todo: move this to some shared memory
+	if settings.isTimerReservoirEnabled() {
+		s.timers.Range(func(key, v interface{}) bool {
+			// todo: maybe change this to not even add to the reservoir
+			// do not flush timers that are zero value
+			if value := v.(timer).Value(); value != 0.0 {
+				s.sink.FlushTimer(key.(string), v.(timer).Value())
+			}
+			s.timers.Delete(key)
+			s.timerCount--
+			return true
+		})
+	}
 
 	flushableSink, ok := s.sink.(FlushableSink)
 	if ok {
@@ -490,14 +546,35 @@ func (s *statStore) NewPerInstanceGauge(name string, tags map[string]string) Gau
 	return s.newGaugeWithTagSet(name, tagspkg.TagSet(nil).MergePerInstanceTags(tags))
 }
 
-func (s *statStore) newTimer(serializedName string, base time.Duration) *timer {
+func (s *statStore) newTimer(serializedName string, base time.Duration) timer {
 	if v, ok := s.timers.Load(serializedName); ok {
-		return v.(*timer)
+		return v.(timer)
 	}
-	t := &timer{name: serializedName, sink: s.sink, base: base}
+
+	var t timer
+	settings := GetSettings() // todo: move this to some shared memory
+	if settings.isTimerReservoirEnabled() {
+		t = &reservoirTimer{name: serializedName, base: base}
+
+		// todo: > shouldn't be necessary
+		if s.timerCount >= settings.TimerReservoirSize {
+			// this will delete 1 random timer in the map
+			s.timers.Range(func(key, _ interface{}) bool {
+				s.timers.Delete(key)
+				return false
+			})
+			s.timerCount--
+		}
+	} else {
+		t = &standardTimer{name: serializedName, sink: s.sink, base: base}
+	}
+
 	if v, loaded := s.timers.LoadOrStore(serializedName, t); loaded {
-		return v.(*timer)
+		return v.(timer)
 	}
+
+	s.timerCount++
+
 	return t
 }
 
