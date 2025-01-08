@@ -128,7 +128,7 @@ func TestMilliTimer(t *testing.T) {
 	}
 }
 
-func TestTimerResevoir_Disabled(t *testing.T) {
+func TestTimerReservoir_Disabled(t *testing.T) {
 	err := os.Setenv("GOSTATS_TIMER_RESERVOIR_SIZE", "0")
 	if err != nil {
 		t.Fatalf("Failed to set GOSTATS_TIMER_RESERVOIR_SIZE environment variable: %s", err)
@@ -144,7 +144,7 @@ func TestTimerResevoir_Disabled(t *testing.T) {
 	}
 
 	if ts.String() != "" {
-		t.Errorf("Stats were written pre flush potentially clearing the resevoir too early")
+		t.Errorf("Stats were written pre flush potentially clearing the reservoir too early")
 	}
 
 	store.Flush()
@@ -175,7 +175,7 @@ func TestTimerReservoir(t *testing.T) {
 	}
 
 	if ts.String() != "" {
-		t.Errorf("Stats were written pre flush potentially clearing the resevoir too early")
+		t.Errorf("Stats were written pre flush potentially clearing the reservoir too early")
 	}
 
 	store.Flush()
@@ -204,7 +204,7 @@ func TestTimerReservoir_FilteredZeros(t *testing.T) {
 	}
 
 	if ts.String() != "" {
-		t.Errorf("Stats were written pre flush potentially clearing the resevoir too early")
+		t.Errorf("Stats were written pre flush potentially clearing the reservoir too early")
 	}
 
 	store.Flush()
