@@ -558,7 +558,7 @@ func (s *statStore) newTimer(serializedName string, base time.Duration) timer {
 
 		// todo: > shouldn't be necessary
 		if s.timerCount >= settings.TimerReservoirSize {
-			// this will delete 1 random timer in the map
+			// todo: this will delete 1 random timer in the map, this can probably be smarter
 			s.timers.Range(func(key, _ interface{}) bool {
 				s.timers.Delete(key)
 				return false
