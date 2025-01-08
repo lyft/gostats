@@ -561,9 +561,9 @@ func (s *statStore) newTimer(serializedName string, base time.Duration) timer {
 			// todo: this will delete 1 random timer in the map, this can probably be smarter
 			s.timers.Range(func(key, _ interface{}) bool {
 				s.timers.Delete(key)
+				s.timerCount--
 				return false
 			})
-			s.timerCount--
 		}
 	} else {
 		t = &standardTimer{name: serializedName, sink: s.sink, base: base}
