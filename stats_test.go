@@ -131,7 +131,7 @@ func TestMilliTimer(t *testing.T) {
 func TestTimerResevoir_Disabled(t *testing.T) {
 	err := os.Setenv("GOSTATS_TIMER_RESERVOIR_SIZE", "0")
 	if err != nil {
-		t.Fatalf("Failed to set GOSTATS_BATCH_ENABLED environment variable: %s", err)
+		t.Fatalf("Failed to set GOSTATS_TIMER_RESERVOIR_SIZE environment variable: %s", err)
 	}
 
 	expectedStatCount := 1000
@@ -144,7 +144,7 @@ func TestTimerResevoir_Disabled(t *testing.T) {
 	}
 
 	if ts.String() != "" {
-		t.Errorf("Stats were written despite forced batching")
+		t.Errorf("Stats were written pre flush potentially clearing the resevoir too early")
 	}
 
 	store.Flush()
@@ -162,7 +162,7 @@ func TestTimerResevoir_Disabled(t *testing.T) {
 func TestTimerReservoir(t *testing.T) {
 	err := os.Setenv("GOSTATS_TIMER_RESERVOIR_SIZE", "100")
 	if err != nil {
-		t.Fatalf("Failed to set GOSTATS_BATCH_ENABLED environment variable: %s", err)
+		t.Fatalf("Failed to set GOSTATS_TIMER_RESERVOIR_SIZE environment variable: %s", err)
 	}
 
 	expectedStatCount := 100
@@ -175,7 +175,7 @@ func TestTimerReservoir(t *testing.T) {
 	}
 
 	if ts.String() != "" {
-		t.Errorf("Stats were written despite forced batching")
+		t.Errorf("Stats were written pre flush potentially clearing the resevoir too early")
 	}
 
 	store.Flush()
@@ -193,7 +193,7 @@ func TestTimerReservoir(t *testing.T) {
 func TestTimerReservoir_FilteredZeros(t *testing.T) {
 	err := os.Setenv("GOSTATS_TIMER_RESERVOIR_SIZE", "100")
 	if err != nil {
-		t.Fatalf("Failed to set GOSTATS_BATCH_ENABLED environment variable: %s", err)
+		t.Fatalf("Failed to set GOSTATS_TIMER_RESERVOIR_SIZE environment variable: %s", err)
 	}
 
 	ts, sink := setupTestNetSink(t, "tcp", false)
@@ -204,7 +204,7 @@ func TestTimerReservoir_FilteredZeros(t *testing.T) {
 	}
 
 	if ts.String() != "" {
-		t.Errorf("Stats were written despite forced batching")
+		t.Errorf("Stats were written pre flush potentially clearing the resevoir too early")
 	}
 
 	store.Flush()
