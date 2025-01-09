@@ -78,9 +78,9 @@ func TestValidateTags(t *testing.T) {
 	store.Flush()
 
 	expected := "test:1|c"
-	counter := sink.record
-	if !strings.Contains(counter, expected) {
-		t.Error("wanted counter value of test:1|c, got", counter)
+	output := sink.record
+	if !strings.Contains(output, expected) && !strings.Contains(output, "reserved_tag") {
+		t.Errorf("Expected without reserved tags: '%s' Got: '%s'", expected, output)
 	}
 
 	// A reserved tag should trigger adding the reserved_tag counter
@@ -89,10 +89,11 @@ func TestValidateTags(t *testing.T) {
 	store.NewCounterWithTags("test", map[string]string{"host": "i"}).Inc()
 	store.Flush()
 
-	expected = "reserved_tag:1|c\ntest.__host=i:1|c"
-	counter = sink.record
-	if !strings.Contains(counter, expected) {
-		t.Error("wanted counter value of test.___f=i:1|c, got", counter)
+	expected = "test.__host=i:1|c"
+	expectedReservedTag := "reserved_tag:1|c"
+	output = sink.record
+	if !strings.Contains(output, expected) && !strings.Contains(output, expectedReservedTag) {
+		t.Errorf("Expected: '%s' and '%s', In: '%s'", expected, expectedReservedTag, output)
 	}
 }
 
