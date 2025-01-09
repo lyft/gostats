@@ -29,7 +29,7 @@ const (
 
 	flushInterval           = 2 * time.Second
 	logOnEveryNDroppedBytes = 1 << 15 // Log once per 32kb of dropped stats
-	defaultBufferSizeTCP    = 1 << 16
+	defaultBufferSizeTCP    = 1 << 16 * 2
 
 	// 1432 bytes is optimal for regular networks with an MTU of 1500 and
 	// is to prevent fragmenting UDP datagrams
@@ -111,14 +111,17 @@ func NewNetSink(opts ...SinkOption) FlushableSink {
 	// Calculate buffer size based on protocol, for UDP we want to pick a
 	// buffer size that will prevent datagram fragmentation.
 	var bufSize int
+	var queueSize int
 	switch s.conf.StatsdProtocol {
 	case "udp", "udp4", "udp6":
 		bufSize = defaultBufferSizeUDP
+		queueSize = approxMaxMemBytes / bufSize
 	default:
 		bufSize = defaultBufferSizeTCP
+		queueSize = (approxMaxMemBytes * 2) / bufSize
 	}
 
-	s.outc = make(chan *bytes.Buffer, approxMaxMemBytes/bufSize)
+	s.outc = make(chan *bytes.Buffer, queueSize)
 	s.retryc = make(chan *bytes.Buffer, 1) // It should be okay to limit this given we preferentially process from this over outc.
 
 	writer := &sinkWriter{outc: s.outc}
