@@ -27,7 +27,7 @@ const (
 	defaultDialTimeout   = defaultRetryInterval / 2
 	defaultWriteTimeout  = time.Second
 
-	flushInterval           = time.Second
+	flushInterval           = 2 * time.Second
 	logOnEveryNDroppedBytes = 1 << 15 // Log once per 32kb of dropped stats
 	defaultBufferSizeTCP    = 1 << 16
 
