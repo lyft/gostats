@@ -303,7 +303,7 @@ type timer interface {
 	AddDuration(time.Duration)
 	AddValue(float64)
 	AllocateSpan() Timespan
-	Values() []float64
+	CollectedValue() []float64
 	SampleRate() float64
 }
 
@@ -329,7 +329,7 @@ func (t *standardTimer) AllocateSpan() Timespan {
 	return &timespan{timer: t, start: time.Now()}
 }
 
-func (t *standardTimer) Values() []float64 {
+func (t *standardTimer) CollectedValue() []float64 {
 	return nil
 }
 
@@ -376,7 +376,7 @@ func (t *reservoirTimer) AllocateSpan() Timespan {
 	return &timespan{timer: t, start: time.Now()}
 }
 
-func (t *reservoirTimer) Values() []float64 {
+func (t *reservoirTimer) CollectedValue() []float64 {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 
@@ -468,8 +468,8 @@ func (s *statStore) Flush() {
 		s.timers.Range(func(key, v interface{}) bool {
 			timer := v.(timer)
 			sampleRate := timer.SampleRate()
-			for _, value := range timer.Values() {
-				s.sink.FlushTimerWithSampleRate(key.(string), value, sampleRate)
+			for _, value := range timer.CollectedValue() {
+				s.sink.FlushAggregatedTimer(key.(string), value, sampleRate)
 			}
 
 			s.timers.Delete(key) // todo: not sure if this cleanup is necessary

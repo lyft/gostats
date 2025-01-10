@@ -263,7 +263,7 @@ func (s *netSink) FlushTimer(name string, value float64) {
 	s.optimizedFloatFlush(name, value, "|ms\n")
 }
 
-func (s *netSink) FlushTimerWithSampleRate(name string, value float64, sampleRate float64) {
+func (s *netSink) FlushAggregatedTimer(name string, value float64, sampleRate float64) {
 	suffix := fmt.Sprintf("|ms|@%.1f\n", sampleRate)
 	s.optimizedFloatFlush(name, value, suffix)
 }

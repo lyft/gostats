@@ -103,17 +103,10 @@ func (s *Sink) FlushTimer(name string, val float64) {
 	atomic.AddInt64(&p.count, 1)
 }
 
-// FlushTimer implements the stats.Sink.FlushTimer method and adds val to
+// FlushAggregatedTimer implements the stats.Sink.FlushAggregatedTimer method and adds val to
 // stat name.
-func (s *Sink) FlushTimerWithSampleRate(name string, val float64, _ float64) {
-	timers := s.timers()
-	v, ok := timers.Load(name)
-	if !ok {
-		v, _ = timers.LoadOrStore(name, new(entry))
-	}
-	p := v.(*entry)
-	atomicAddFloat64(&p.val, val)
-	atomic.AddInt64(&p.count, 1)
+func (s *Sink) FlushAggregatedTimer(name string, val float64, _ float64) {
+	s.FlushTimer(name, val)
 }
 
 // LoadCounter returns the value for stat name and if it was found.
