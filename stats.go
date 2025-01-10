@@ -2,7 +2,6 @@ package stats
 
 import (
 	"context"
-	"math"
 	"strconv"
 	"sync"
 	"sync/atomic"
@@ -304,7 +303,8 @@ type timer interface {
 	AddDuration(time.Duration)
 	AddValue(float64)
 	AllocateSpan() Timespan
-	Value() float64
+	Values() []float64
+	SampleRate() float64
 }
 
 type standardTimer struct {
@@ -329,14 +329,22 @@ func (t *standardTimer) AllocateSpan() Timespan {
 	return &timespan{timer: t, start: time.Now()}
 }
 
-func (t *standardTimer) Value() float64 {
-	return 0.0 // float zero value
+func (t *standardTimer) Values() []float64 {
+	return nil
+}
+
+func (t *standardTimer) SampleRate() float64 {
+	return 0.0 // todo: using zero value of float64. the correct value would be 1.0 given 1 stat, hwoever that 1 stat is never stored, just flushed right away
 }
 
 type reservoirTimer struct {
-	base  time.Duration
-	name  string
-	value uint64
+	base     time.Duration
+	name     string
+	capacity int
+	values   []float64
+	fill     int // todo: the only purpose of this is to be faster than calculating len(values), is it worht it?
+	count    int
+	mu       sync.Mutex
 }
 
 func (t *reservoirTimer) time(dur time.Duration) {
@@ -348,16 +356,38 @@ func (t *reservoirTimer) AddDuration(dur time.Duration) {
 }
 
 func (t *reservoirTimer) AddValue(value float64) {
-	// todo does this need to be atomtic? ideally for the the use case it won't/shouldn't be changed like a counter/gauge would be
-	atomic.StoreUint64(&t.value, math.Float64bits(value))
+	t.mu.Lock()
+	defer t.mu.Unlock()
+
+	// todo: consider edge cases for <
+	if t.fill < t.capacity {
+		t.values = append(t.values, value)
+	} else {
+		// todo: discarding the oldest value when the reference is full, this can probably be smarter
+		t.values = append(t.values[1:], value)
+		t.fill--
+	}
+
+	t.fill++
+	t.count++
 }
 
 func (t *reservoirTimer) AllocateSpan() Timespan {
 	return &timespan{timer: t, start: time.Now()}
 }
 
-func (t *reservoirTimer) Value() float64 {
-	return math.Float64frombits(atomic.LoadUint64(&t.value))
+func (t *reservoirTimer) Values() []float64 {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+
+	// todo: Return a copy of the values slice to avoid data races
+	valuesCopy := make([]float64, len(t.values))
+	copy(valuesCopy, t.values)
+	return valuesCopy
+}
+
+func (t *reservoirTimer) SampleRate() float64 {
+	return float64(t.fill) / float64(t.count) // todo: is it faster to store these values as float64 instead of converting here
 }
 
 type timespan struct {
@@ -378,9 +408,7 @@ func (ts *timespan) CompleteWithDuration(value time.Duration) {
 type statStore struct {
 	counters sync.Map
 	gauges   sync.Map
-	timers   sync.Map
-
-	timerCount int
+	timers   sync.Map // todo: should be control this count, especially for reservoirs we will be storing a lot of these in memory before flushing them
 
 	mu             sync.RWMutex
 	statGenerators []StatGenerator
@@ -438,13 +466,13 @@ func (s *statStore) Flush() {
 	settings := GetSettings() // todo: move this to some shared memory
 	if settings.isTimerReservoirEnabled() {
 		s.timers.Range(func(key, v interface{}) bool {
-			// todo: maybe change this to not even add to the reservoir
-			// do not flush timers that are zero value
-			if value := v.(timer).Value(); value != 0.0 {
-				s.sink.FlushTimer(key.(string), v.(timer).Value())
+			timer := v.(timer)
+			sampleRate := timer.SampleRate()
+			for _, value := range timer.Values() {
+				s.sink.FlushTimerWithSampleRate(key.(string), value, sampleRate)
 			}
+
 			s.timers.Delete(key)
-			s.timerCount--
 			return true
 		})
 	}
@@ -554,26 +582,27 @@ func (s *statStore) newTimer(serializedName string, base time.Duration) timer {
 	var t timer
 	settings := GetSettings() // todo: move this to some shared memory
 	if settings.isTimerReservoirEnabled() {
-		t = &reservoirTimer{name: serializedName, base: base}
-
-		// todo: > shouldn't be necessary
-		if s.timerCount >= settings.TimerReservoirSize {
-			// todo: this will delete 1 random timer in the map, this can probably be smarter
-			s.timers.Range(func(key, _ interface{}) bool {
-				s.timers.Delete(key)
-				s.timerCount--
-				return false
-			})
+		// todo: have defaults defined in a shared location
+		t = &reservoirTimer{
+			name:     serializedName,
+			base:     base,
+			capacity: 100,
+			values:   make([]float64, 0, 100),
+			fill:     0,
+			count:    0,
 		}
 	} else {
-		t = &standardTimer{name: serializedName, sink: s.sink, base: base}
+		t = &standardTimer{
+			name: serializedName,
+			sink: s.sink,
+			base: base,
+		}
 	}
 
+	// todo: why would the timer ever be replaced, will this hurt reservoirs or benefit them? or is it just redundant since we load above?
 	if v, loaded := s.timers.LoadOrStore(serializedName, t); loaded {
 		return v.(timer)
 	}
-
-	s.timerCount++
 
 	return t
 }

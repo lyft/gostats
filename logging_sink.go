@@ -92,6 +92,10 @@ func (s *loggingSink) FlushGauge(name string, value uint64) { s.log(name, "gauge
 
 func (s *loggingSink) FlushTimer(name string, value float64) { s.log(name, "timer", value) }
 
+func (s *loggingSink) FlushTimerWithSampleRate(name string, value float64, _ float64) {
+	s.log(name, "timer", value)
+}
+
 func (s *loggingSink) Flush() { s.log("", "all stats", 0) }
 
 // Logger

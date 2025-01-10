@@ -260,15 +260,23 @@ func (s *netSink) FlushGauge(name string, value uint64) {
 }
 
 func (s *netSink) FlushTimer(name string, value float64) {
-	// Since we mistakenly use floating point values to represent time
-	// durations this method is often passed an integer encoded as a
-	// float. Formatting integers is much faster (>2x) than formatting
+	s.optimizedFloatFlush(name, value, "|ms\n")
+}
+
+func (s *netSink) FlushTimerWithSampleRate(name string, value float64, sampleRate float64) {
+	suffix := fmt.Sprintf("|ms|@%.1f\n", sampleRate)
+	s.optimizedFloatFlush(name, value, suffix)
+}
+
+func (s *netSink) optimizedFloatFlush(name string, value float64, suffix string) {
+	// Since we sometimes use floating point values (e.g. when representing time
+	// durations), data is often an integer encoded as a float.
+	// Formatting integers is much faster (>2x) than formatting
 	// floats so use integer formatting whenever possible.
-	//
 	if 0 <= value && value < math.MaxUint64 && math.Trunc(value) == value {
-		s.flushUint64(name, "|ms\n", uint64(value))
+		s.flushUint64(name, suffix, uint64(value))
 	} else {
-		s.flushFloat64(name, "|ms\n", value)
+		s.flushFloat64(name, suffix, value)
 	}
 }
 

@@ -13,4 +13,6 @@ func (s nullSink) FlushGauge(name string, value uint64) {} //nolint:revive
 
 func (s nullSink) FlushTimer(name string, value float64) {} //nolint:revive
 
+func (s nullSink) FlushTimerWithSampleRate(name string, value float64, sampleRate float64) {} //nolint:revive
+
 func (s nullSink) Flush() {}
