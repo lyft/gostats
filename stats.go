@@ -472,7 +472,7 @@ func (s *statStore) Flush() {
 				s.sink.FlushTimerWithSampleRate(key.(string), value, sampleRate)
 			}
 
-			s.timers.Delete(key)
+			s.timers.Delete(key) // todo: not sure if this cleanup is necessary
 			return true
 		})
 	}
@@ -582,6 +582,9 @@ func (s *statStore) newTimer(serializedName string, base time.Duration) timer {
 	var t timer
 	settings := GetSettings() // todo: move this to some shared memory
 	if settings.isTimerReservoirEnabled() {
+		// todo: if s.timers gets to a certain size, we can flush all timers and delete them from the map
+		// todo: no idea how memory was managed here before did we just expect the map of s.timers to just be replaced after it's filled?
+
 		// todo: have defaults defined in a shared location
 		t = &reservoirTimer{
 			name:     serializedName,
