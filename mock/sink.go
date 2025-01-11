@@ -105,7 +105,7 @@ func (s *Sink) FlushTimer(name string, val float64) {
 
 // FlushAggregatedTimer implements the stats.Sink.FlushAggregatedTimer method and adds val to
 // stat name.
-func (s *Sink) FlushAggregatedTimer(name string, val float64, _ float64) {
+func (s *Sink) FlushAggregatedTimer(name string, val, _ float64) {
 	s.FlushTimer(name, val)
 }
 

@@ -464,10 +464,13 @@ func (s *statStore) Flush() {
 	})
 
 	settings := GetSettings() // todo: move this to some shared memory
+	// todo: i'm not sure not sure if we need a condition here or there's another way to assume this implicitly but since to my understanding s.timers
+	// will retain/store data even if it's unused in the case of standardTimer. in any case this should provide some optimization
 	if settings.isTimerReservoirEnabled() {
 		s.timers.Range(func(key, v interface{}) bool {
 			timer := v.(timer)
 			sampleRate := timer.SampleRate()
+			// CollectedValue() should be nil unless reservoirTimer
 			for _, value := range timer.CollectedValue() {
 				s.sink.FlushAggregatedTimer(key.(string), value, sampleRate)
 			}

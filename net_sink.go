@@ -260,19 +260,19 @@ func (s *netSink) FlushGauge(name string, value uint64) {
 }
 
 func (s *netSink) FlushTimer(name string, value float64) {
-	s.optimizedFloatFlush(name, value, "|ms\n")
+	s.flushFloatOptimized(name, "|ms\n", value)
 }
 
-func (s *netSink) FlushAggregatedTimer(name string, value float64, sampleRate float64) {
+func (s *netSink) FlushAggregatedTimer(name string, value, sampleRate float64) {
 	suffix := fmt.Sprintf("|ms|@%.1f\n", sampleRate)
-	s.optimizedFloatFlush(name, value, suffix)
+	s.flushFloatOptimized(name, suffix, value)
 }
 
-func (s *netSink) optimizedFloatFlush(name string, value float64, suffix string) {
-	// Since we sometimes use floating point values (e.g. when representing time
-	// durations), data is often an integer encoded as a float.
-	// Formatting integers is much faster (>2x) than formatting
-	// floats so use integer formatting whenever possible.
+func (s *netSink) flushFloatOptimized(name, suffix string, value float64) {
+	// Since we historitically used floating point values to represent time
+	// durations, metrics (particularly timers) are often recorded as an integer encoded as a
+	// float. Formatting integers is much faster (>2x) than formatting
+	// floats, so we should convert to an integer whenever possible.
 	if 0 <= value && value < math.MaxUint64 && math.Trunc(value) == value {
 		s.flushUint64(name, suffix, uint64(value))
 	} else {
