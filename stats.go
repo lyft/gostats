@@ -216,7 +216,7 @@ type StatGenerator interface {
 func NewStore(sink Sink, _ bool) Store {
 	return &statStore{
 		sink: sink,
-		conf: GetSettings(), // todo: right now the enviornmnet is being loaded in multiple places and this is inefficient
+		conf: GetSettings(), // todo: right now the environment is being loaded in multiple places and can be made more efficient
 	}
 }
 
@@ -404,9 +404,10 @@ func (ts *timespan) CompleteWithDuration(value time.Duration) {
 }
 
 type statStore struct {
+	// todo: no idea how memory was managed here, when is are the entries ever gc'd?
 	counters sync.Map
 	gauges   sync.Map
-	timers   sync.Map // todo: idea how memory was managed here before did we just expect these maps to just be replaced after it's filled?
+	timers   sync.Map
 
 	mu             sync.RWMutex
 	statGenerators []StatGenerator
