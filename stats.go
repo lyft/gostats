@@ -404,7 +404,7 @@ func (ts *timespan) CompleteWithDuration(value time.Duration) {
 }
 
 type statStore struct {
-	// todo: no idea how memory was managed here, when is are the entries ever gc'd?
+	// todo: no idea how memory is managed here, when are the map entries ever deleted?
 	counters sync.Map
 	gauges   sync.Map
 	timers   sync.Map
@@ -451,6 +451,8 @@ func (s *statStore) Flush() {
 	}
 	s.mu.RUnlock()
 
+	// todo: if we're not deleting the data we flush from these maps, won't we just keep resending them?
+
 	s.counters.Range(func(key, v interface{}) bool {
 		// do not flush counters that are set to zero
 		if value := v.(*counter).latch(); value != 0 {
@@ -470,7 +472,9 @@ func (s *statStore) Flush() {
 			for _, value := range timer.CollectedValue() {
 				s.sink.FlushAggregatedTimer(key.(string), value, sampleRate)
 			}
+			s.timers.Delete(key) // delete it from the map so it's not flushed again
 		}
+
 		return true
 	})
 
@@ -593,7 +597,6 @@ func (s *statStore) newTimer(serializedName string, base time.Duration) timer {
 		}
 	}
 
-	// todo: do we need special rules to not lose active reservoirs
 	if v, loaded := s.timers.LoadOrStore(serializedName, t); loaded {
 		return v.(timer)
 	}
