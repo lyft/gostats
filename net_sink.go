@@ -264,7 +264,8 @@ func (s *netSink) FlushTimer(name string, value float64) {
 }
 
 func (s *netSink) FlushAggregatedTimer(name string, value, sampleRate float64) {
-	suffix := fmt.Sprintf("|ms|@%.1f\n", sampleRate)
+	// todo: this can be further optimized by strconv.AppendFloat directly to the buffer in flush(Uint|Float)64 however we would need more conditions or code duplication
+	suffix := "|ms|@" + strconv.FormatFloat(sampleRate, 'f', 2, 64) + "\n" // todo: deteremine how many decimal places we need
 	s.flushFloatOptimized(name, suffix, value)
 }
 

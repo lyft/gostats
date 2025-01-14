@@ -2,6 +2,7 @@ package stats
 
 import (
 	"context"
+	"math/bits"
 	"strconv"
 	"sync"
 	"sync/atomic"
@@ -216,7 +217,7 @@ type StatGenerator interface {
 func NewStore(sink Sink, _ bool) Store {
 	return &statStore{
 		sink: sink,
-		conf: GetSettings(), // todo: right now the environment is being loaded in multiple places and can be made more efficient
+		conf: GetSettings(), // todo: right now the environment is being loaded in multiple places and can be made more efficient by computing it once and storing for subsequent gets
 	}
 }
 
@@ -306,6 +307,7 @@ type timer interface {
 	AddDuration(time.Duration)
 	AddValue(float64)
 	AllocateSpan() Timespan
+	ResetValue(int, float64)
 	CollectedValue() []float64
 	SampleRate() float64
 }
@@ -332,6 +334,8 @@ func (t *standardTimer) AllocateSpan() Timespan {
 	return &timespan{timer: t, start: time.Now()}
 }
 
+func (t *standardTimer) ResetValue(_ int, _ float64) {}
+
 func (t *standardTimer) CollectedValue() []float64 {
 	return nil // since we flush right away nothing will be collected
 }
@@ -341,12 +345,14 @@ func (t *standardTimer) SampleRate() float64 {
 }
 
 type reservoirTimer struct {
+	mu       sync.Mutex
 	base     time.Duration
 	name     string
-	capacity int
+	ringSize int
+	ringMask int
 	values   []float64
 	count    int
-	mu       sync.Mutex
+	overflow int
 }
 
 func (t *reservoirTimer) time(dur time.Duration) {
@@ -361,10 +367,11 @@ func (t *reservoirTimer) AddValue(value float64) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 
-	if t.count < t.capacity {
-		t.values = append(t.values, value)
-	} else {
-		t.values = append(t.values[1:], value) // discard the oldest value when the reservoir is full, this can probably be smarter
+	t.values[t.overflow&t.ringMask] = value
+	t.overflow++
+
+	if t.overflow == t.ringSize {
+		t.overflow = 0
 	}
 
 	t.count++
@@ -374,18 +381,31 @@ func (t *reservoirTimer) AllocateSpan() Timespan {
 	return &timespan{timer: t, start: time.Now()}
 }
 
+func (t *reservoirTimer) ResetValue(index int, value float64) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+
+	// todo: we mistakingly record timers as floats, if we could confidently make this an int we optimize the reset with some bitwise/xor
+	if t.values[index] == value {
+		t.values[index] = 0
+	}
+}
+
 func (t *reservoirTimer) CollectedValue() []float64 {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 
 	// return a copy of the values slice to avoid data races
-	values := make([]float64, len(t.values))
+	values := make([]float64, t.ringSize) // todo: is it worth it to use t.ringSize instead of computing len of values worth it?
 	copy(values, t.values)
 	return values
 }
 
 func (t *reservoirTimer) SampleRate() float64 {
-	return float64(len(t.values)) / float64(t.count)
+	if t.count <= t.ringSize {
+		return 1.0
+	}
+	return float64(t.ringSize) / float64(t.count) // todo: is it worth it to use t.ringSize instead of computing len of values worth it?
 }
 
 type timespan struct {
@@ -404,7 +424,7 @@ func (ts *timespan) CompleteWithDuration(value time.Duration) {
 }
 
 type statStore struct {
-	// todo: no idea how memory is managed here, when are the map entries ever deleted?
+	// slots in this maps are reused as stats names are stable over the lifetime of the process
 	counters sync.Map
 	gauges   sync.Map
 	timers   sync.Map
@@ -451,8 +471,6 @@ func (s *statStore) Flush() {
 	}
 	s.mu.RUnlock()
 
-	// todo: if we're not deleting the data we flush from these maps, won't we just keep resending them?
-
 	s.counters.Range(func(key, v interface{}) bool {
 		// do not flush counters that are set to zero
 		if value := v.(*counter).latch(); value != 0 {
@@ -469,10 +487,17 @@ func (s *statStore) Flush() {
 	s.timers.Range(func(key, v interface{}) bool {
 		if timer, ok := v.(*reservoirTimer); ok {
 			sampleRate := timer.SampleRate()
-			for _, value := range timer.CollectedValue() {
-				s.sink.FlushAggregatedTimer(key.(string), value, sampleRate)
+			if sampleRate == 0.0 {
+				return true // todo: may provide reduce some processing but not sure if it's worth the complexity
 			}
-			s.timers.Delete(key) // delete it from the map so it's not flushed again
+
+			for i, value := range timer.CollectedValue() {
+				// todo: i think i need to preprocess what we flush as skipping should affect the sample rate
+				if value != 0.0 {
+					s.sink.FlushAggregatedTimer(key.(string), value, sampleRate)
+					timer.ResetValue(i, value)
+				}
+			}
 		}
 
 		return true
@@ -582,12 +607,14 @@ func (s *statStore) newTimer(serializedName string, base time.Duration) timer {
 
 	var t timer
 	if s.conf.isTimerReservoirEnabled() {
+		capacity := s.conf.TimerReservoirSize
+		capacityRoundedToTheNextPowerOfTwo := 1 << bits.Len(uint(capacity))
 		t = &reservoirTimer{
 			name:     serializedName,
 			base:     base,
-			capacity: s.conf.TimerReservoirSize,
-			values:   make([]float64, 0, s.conf.TimerReservoirSize),
-			count:    0,
+			ringSize: capacity,
+			ringMask: capacityRoundedToTheNextPowerOfTwo - 1,
+			values:   make([]float64, capacity),
 		}
 	} else {
 		t = &standardTimer{
