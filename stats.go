@@ -440,7 +440,7 @@ func (ts *timespan) CompleteWithDuration(value time.Duration) {
 }
 
 type statStore struct {
-	// slots in this maps are reused as stats names are stable over the lifetime of the process
+	// these maps may grow indefinitely however slots in this maps are reused as stats names are stable over the lifetime of the process
 	counters sync.Map
 	gauges   sync.Map
 	timers   sync.Map
@@ -504,12 +504,12 @@ func (s *statStore) Flush() {
 		if timer, ok := v.(*reservoirTimer); ok {
 			sampleRate := timer.SampleRate()
 
-			// since the map memory is reused only process how we accumulated in the current processing itteration
+			// since the map memory is reused only process what we accumulated in the current processing itteration
 			for i := 0; i < timer.ValueCount(); i++ {
 				s.sink.FlushAggregatedTimer(key.(string), timer.GetValue(i), sampleRate)
 			}
 
-			timer.Reset() // todo: need to add test coverage for a reused map
+			timer.Reset()
 		}
 
 		return true

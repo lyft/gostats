@@ -332,6 +332,80 @@ func TestTimerReservoir_IndependantReservoirs(t *testing.T) {
 	os.Unsetenv("GOSTATS_TIMER_RESERVOIR_SIZE")
 }
 
+func TestTimerReservoir_ReusedStore(t *testing.T) {
+	err := os.Setenv("GOSTATS_TIMER_RESERVOIR_SIZE", "100")
+	if err != nil {
+		t.Fatalf("Failed to set GOSTATS_TIMER_RESERVOIR_SIZE environment variable: %s", err)
+	}
+
+	expectedStatCount := 100
+
+	ts, sink := setupTestNetSink(t, "tcp", false)
+	store := NewStore(sink, true)
+
+	for i := 0; i < 100; i++ {
+		store.NewTimer("test").AddValue(float64(i % 10))
+	}
+
+	if ts.String() != "" {
+		t.Errorf("Stats were written pre flush potentially clearing the reservoir too early")
+	}
+
+	store.Flush()
+
+	time.Sleep(1001 * time.Millisecond)
+
+	stats := strings.Split(ts.Pull(), "\n")
+	statCount := len(stats) - 1 // there will be 1 extra new line character at the end of the buffer
+	if statCount != expectedStatCount {
+		t.Errorf("Not all stats were written\ngot: %d\nwanted: %d", statCount, expectedStatCount)
+	}
+
+	stats = stats[:statCount]
+	for _, stat := range stats {
+		value := strings.Split(stat, ":")[1]
+		sampleRate := strings.Split(value, ("|@"))[1]
+		if sampleRate != "1.00" {
+			t.Errorf("A stat was written without a 1.00 sample rate: %s", stat)
+		}
+	}
+
+	if ts.String() != "" {
+		t.Errorf("Sink hasn't been cleared")
+	}
+
+	expectedStatCount = 50
+
+	for i := 0; i < 50; i++ {
+		store.NewTimer("test").AddValue(float64(i % 10))
+	}
+
+	if ts.String() != "" {
+		t.Errorf("Stats were written pre flush potentially clearing the reservoir too early")
+	}
+
+	store.Flush()
+
+	time.Sleep(1001 * time.Millisecond)
+
+	stats = strings.Split(ts.Pull(), "\n")
+	statCount = len(stats) - 1 // there will be 1 extra new line character at the end of the buffer
+	if statCount != expectedStatCount {
+		t.Errorf("Not all stats were written\ngot: %d\nwanted: %d", statCount, expectedStatCount)
+	}
+
+	stats = stats[:statCount]
+	for _, stat := range stats {
+		value := strings.Split(stat, ":")[1]
+		sampleRate := strings.Split(value, ("|@"))[1]
+		if sampleRate != "1.00" {
+			t.Errorf("A stat was written without a 1.00 sample rate: %s", stat)
+		}
+	}
+
+	os.Unsetenv("GOSTATS_TIMER_RESERVOIR_SIZE")
+}
+
 // Ensure 0 counters are not flushed
 func TestZeroCounters(t *testing.T) {
 	sink := &testStatSink{}
