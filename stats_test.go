@@ -180,7 +180,7 @@ func TestTimerReservoir_Overflow(t *testing.T) {
 	store := NewStore(sink, true)
 
 	for i := 0; i < 1000; i++ {
-		store.NewTimer("test").AddValue(float64(i%10) + 1) // don't create timers with 0 values to make the count deterministic
+		store.NewTimer("test").AddValue(float64(i % 10))
 	}
 
 	if ts.String() != "" {
@@ -221,7 +221,7 @@ func TestTimerReservoir_Full(t *testing.T) {
 	store := NewStore(sink, true)
 
 	for i := 0; i < 100; i++ {
-		store.NewTimer("test").AddValue(float64(i%10) + 1) // don't create timers with 0 values to make the count deterministic
+		store.NewTimer("test").AddValue(float64(i % 10))
 	}
 
 	if ts.String() != "" {
@@ -262,7 +262,7 @@ func TestTimerReservoir_NotFull(t *testing.T) {
 	store := NewStore(sink, true)
 
 	for i := 0; i < 50; i++ {
-		store.NewTimer("test").AddValue(float64(i%10) + 1) // don't create timers with 0 values to make the count deterministic
+		store.NewTimer("test").AddValue(float64(i % 10))
 	}
 
 	if ts.String() != "" {
@@ -303,7 +303,7 @@ func TestTimerReservoir_IndependantReservoirs(t *testing.T) {
 	store := NewStore(sink, true)
 
 	for i := 0; i < 1000; i++ {
-		store.NewTimer("test" + strconv.Itoa(i)).AddValue(float64(i%10) + 1) // use different names so that we don't conflate the metrics into the same reservoir
+		store.NewTimer("test" + strconv.Itoa(i)).AddValue(float64(i % 10)) // use different names so that we don't conflate the metrics into the same reservoir
 	}
 
 	if ts.String() != "" {
@@ -326,43 +326,6 @@ func TestTimerReservoir_IndependantReservoirs(t *testing.T) {
 		sampleRate := strings.Split(value, ("|@"))[1]
 		if sampleRate != "1.00" {
 			t.Errorf("A stat was written without a 1.00 sample rate: %s", stat)
-		}
-	}
-
-	os.Unsetenv("GOSTATS_TIMER_RESERVOIR_SIZE")
-}
-
-func TestTimerReservoir_FilteredZeros(t *testing.T) {
-	err := os.Setenv("GOSTATS_TIMER_RESERVOIR_SIZE", "100")
-	if err != nil {
-		t.Fatalf("Failed to set GOSTATS_TIMER_RESERVOIR_SIZE environment variable: %s", err)
-	}
-
-	ts, sink := setupTestNetSink(t, "tcp", false)
-	store := NewStore(sink, true)
-
-	for i := 0; i < 1000; i++ {
-		store.NewTimer("test").AddValue(float64(i % 10))
-	}
-
-	if ts.String() != "" {
-		t.Errorf("Stats were written pre flush potentially clearing the reservoir too early")
-	}
-	store.Flush()
-
-	time.Sleep(1001 * time.Millisecond)
-
-	stats := strings.Split(ts.String(), "\n")
-	stats = stats[:len(stats)-1] // there will be 1 extra new line character at the end of the buffer
-	for _, stat := range stats {
-		value := strings.Split(stat, ":")[1]
-		sampleRate := strings.Split(value, ("|@"))[1]
-		value = strings.Split(value, ("|ms"))[0] // strip value and remove suffix and get raw number
-		if value == "0" {
-			t.Errorf("A stat was written with a zero value: %s", stat)
-		}
-		if sampleRate != "0.10" {
-			t.Errorf("A stat was written without a 0.10 sample rate: %s", stat)
 		}
 	}
 

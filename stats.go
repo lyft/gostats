@@ -307,9 +307,10 @@ type timer interface {
 	AddDuration(time.Duration)
 	AddValue(float64)
 	AllocateSpan() Timespan
-	ResetValue(int, float64)
-	CollectedValue() []float64
+	GetValue(int) float64
+	ValueCount() int
 	SampleRate() float64
+	Reset()
 }
 
 type standardTimer struct {
@@ -334,15 +335,20 @@ func (t *standardTimer) AllocateSpan() Timespan {
 	return &timespan{timer: t, start: time.Now()}
 }
 
-func (t *standardTimer) ResetValue(_ int, _ float64) {}
+func (t *standardTimer) GetValue(_ int) float64 {
+	return 0.0 // since we flush right away nothing will be collected
+}
 
-func (t *standardTimer) CollectedValue() []float64 {
-	return nil // since we flush right away nothing will be collected
+func (t *standardTimer) ValueCount() int {
+	return 0 // since we flush right away nothing will be collected
 }
 
 func (t *standardTimer) SampleRate() float64 {
 	return 1.0 // metrics which are not sampled have an implicit sample rate 1.0
 }
+
+// nothing to persisted in memroy for this timer
+func (t *standardTimer) Reset() {}
 
 type reservoirTimer struct {
 	mu       sync.Mutex
@@ -370,6 +376,7 @@ func (t *reservoirTimer) AddValue(value float64) {
 	t.values[t.overflow&t.ringMask] = value
 	t.overflow++
 
+	// todo: can i optimize this with xor?
 	if t.overflow == t.ringSize {
 		t.overflow = 0
 	}
@@ -381,31 +388,40 @@ func (t *reservoirTimer) AllocateSpan() Timespan {
 	return &timespan{timer: t, start: time.Now()}
 }
 
-func (t *reservoirTimer) ResetValue(index int, value float64) {
+func (t *reservoirTimer) GetValue(index int) float64 {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 
-	// todo: we mistakingly record timers as floats, if we could confidently make this an int we optimize the reset with some bitwise/xor
-	if t.values[index] == value {
-		t.values[index] = 0
-	}
+	return t.values[index]
 }
 
-func (t *reservoirTimer) CollectedValue() []float64 {
-	t.mu.Lock()
+func (t *reservoirTimer) ValueCount() int {
+	t.mu.Lock() // todo: could probably convert locks like this to atomic.LoadUint64
 	defer t.mu.Unlock()
 
-	// return a copy of the values slice to avoid data races
-	values := make([]float64, t.ringSize) // todo: is it worth it to use t.ringSize instead of computing len of values worth it?
-	copy(values, t.values)
-	return values
+	if t.count > t.ringSize {
+		return t.ringSize
+	}
+	return t.count
 }
 
 func (t *reservoirTimer) SampleRate() float64 {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+
+	// todo: a 0 count should probably not be a 1.0 sample rate
 	if t.count <= t.ringSize {
 		return 1.0
 	}
 	return float64(t.ringSize) / float64(t.count) // todo: is it worth it to use t.ringSize instead of computing len of values worth it?
+}
+
+func (t *reservoirTimer) Reset() {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+
+	t.count = 0 // this will imply a 0.0 sample rate until it's increased
+	t.overflow = 0
 }
 
 type timespan struct {
@@ -487,17 +503,13 @@ func (s *statStore) Flush() {
 	s.timers.Range(func(key, v interface{}) bool {
 		if timer, ok := v.(*reservoirTimer); ok {
 			sampleRate := timer.SampleRate()
-			if sampleRate == 0.0 {
-				return true // todo: may provide reduce some processing but not sure if it's worth the complexity
+
+			// since the map memory is reused only process how we accumulated in the current processing itteration
+			for i := 0; i < timer.ValueCount(); i++ {
+				s.sink.FlushAggregatedTimer(key.(string), timer.GetValue(i), sampleRate)
 			}
 
-			for i, value := range timer.CollectedValue() {
-				// todo: i think i need to preprocess what we flush as skipping should affect the sample rate
-				if value != 0.0 {
-					s.sink.FlushAggregatedTimer(key.(string), value, sampleRate)
-					timer.ResetValue(i, value)
-				}
-			}
+			timer.Reset() // todo: need to add test coverage for a reused map
 		}
 
 		return true
