@@ -353,10 +353,10 @@ type reservoirTimer struct {
 	mu       sync.Mutex
 	base     time.Duration
 	name     string
-	ringSize int // just used so that we don't have to re-evaluate capacity of values
-	ringMask int
+	ringSize uint64 // just used so that we don't have to re-evaluate capacity of values
+	ringMask uint64
 	values   []float64
-	count    int
+	count    uint64
 }
 
 func (t *reservoirTimer) time(dur time.Duration) {
@@ -371,6 +371,7 @@ func (t *reservoirTimer) AddValue(value float64) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 
+	// direct access to t.count and t.ringMask is protected by the mutex
 	t.values[t.count&t.ringMask] = value
 	t.count++
 }
@@ -387,31 +388,27 @@ func (t *reservoirTimer) GetValue(index int) float64 {
 }
 
 func (t *reservoirTimer) ValueCount() int {
-	t.mu.Lock() // todo: could probably convert locks like this to atomic.LoadUint64
-	defer t.mu.Unlock()
+	count := atomic.LoadUint64(&t.count)
+	ringSize := atomic.LoadUint64(&t.ringSize)
 
-	if t.count > t.ringSize {
-		return t.ringSize
+	if count > ringSize {
+		return int(ringSize)
 	}
-	return t.count
+	return int(count)
 }
 
 func (t *reservoirTimer) SampleRate() float64 {
-	t.mu.Lock()
-	defer t.mu.Unlock()
+	count := atomic.LoadUint64(&t.count)
+	ringSize := atomic.LoadUint64(&t.ringSize)
 
-	// todo: a 0 count should probably not be a 1.0 sample rate
-	if t.count <= t.ringSize {
+	if count <= ringSize {
 		return 1.0
 	}
-	return float64(t.ringSize) / float64(t.count)
+	return float64(ringSize) / float64(count)
 }
 
 func (t *reservoirTimer) Reset() {
-	t.mu.Lock()
-	defer t.mu.Unlock()
-
-	t.count = 0 // this will imply a 0.0 sample rate until it's increased
+	atomic.StoreUint64(&t.count, 0)
 }
 
 type timespan struct {
