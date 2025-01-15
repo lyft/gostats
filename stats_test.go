@@ -129,9 +129,9 @@ func TestMilliTimer(t *testing.T) {
 }
 
 func TestTimerReservoir_Disabled(t *testing.T) {
-	err := os.Setenv("GOSTATS_TIMER_RESERVOIR_SIZE", "0")
+	err := os.Setenv("GOSTATS_USE_RESERVOIR_TIMER", "false")
 	if err != nil {
-		t.Fatalf("Failed to set GOSTATS_TIMER_RESERVOIR_SIZE environment variable: %s", err)
+		t.Fatalf("Failed to set GOSTATS_USE_RESERVOIR_TIMER environment variable: %s", err)
 	}
 
 	expectedStatCount := 1000
@@ -165,21 +165,22 @@ func TestTimerReservoir_Disabled(t *testing.T) {
 		}
 	}
 
-	os.Unsetenv("GOSTATS_TIMER_RESERVOIR_SIZE")
+	os.Unsetenv("GOSTATS_USE_RESERVOIR_TIMER")
 }
 
 func TestTimerReservoir_Overflow(t *testing.T) {
-	err := os.Setenv("GOSTATS_TIMER_RESERVOIR_SIZE", "100")
+	err := os.Setenv("GOSTATS_USE_RESERVOIR_TIMER", "true")
 	if err != nil {
-		t.Fatalf("Failed to set GOSTATS_TIMER_RESERVOIR_SIZE environment variable: %s", err)
+		t.Fatalf("Failed to set GOSTATS_USE_RESERVOIR_TIMER environment variable: %s", err)
 	}
 
-	expectedStatCount := 100
+	expectedStatCount := 128 // reservoir size
 
 	ts, sink := setupTestNetSink(t, "tcp", false)
 	store := NewStore(sink, true)
 
-	for i := 0; i < 1000; i++ {
+	// this should equate to a 0.1 sample rate; 0.1 * 1280 = 128
+	for i := 0; i < 1280; i++ {
 		store.NewTimer("test").AddValue(float64(i % 10))
 	}
 
@@ -206,21 +207,21 @@ func TestTimerReservoir_Overflow(t *testing.T) {
 		}
 	}
 
-	os.Unsetenv("GOSTATS_TIMER_RESERVOIR_SIZE")
+	os.Unsetenv("GOSTATS_USE_RESERVOIR_TIMER")
 }
 
 func TestTimerReservoir_Full(t *testing.T) {
-	err := os.Setenv("GOSTATS_TIMER_RESERVOIR_SIZE", "100")
+	err := os.Setenv("GOSTATS_USE_RESERVOIR_TIMER", "true")
 	if err != nil {
-		t.Fatalf("Failed to set GOSTATS_TIMER_RESERVOIR_SIZE environment variable: %s", err)
+		t.Fatalf("Failed to set GOSTATS_USE_RESERVOIR_TIMER environment variable: %s", err)
 	}
 
-	expectedStatCount := 100
+	expectedStatCount := 128 // reservoir size
 
 	ts, sink := setupTestNetSink(t, "tcp", false)
 	store := NewStore(sink, true)
 
-	for i := 0; i < 100; i++ {
+	for i := 0; i < 128; i++ {
 		store.NewTimer("test").AddValue(float64(i % 10))
 	}
 
@@ -247,13 +248,13 @@ func TestTimerReservoir_Full(t *testing.T) {
 		}
 	}
 
-	os.Unsetenv("GOSTATS_TIMER_RESERVOIR_SIZE")
+	os.Unsetenv("GOSTATS_USE_RESERVOIR_TIMER")
 }
 
 func TestTimerReservoir_NotFull(t *testing.T) {
-	err := os.Setenv("GOSTATS_TIMER_RESERVOIR_SIZE", "100")
+	err := os.Setenv("GOSTATS_USE_RESERVOIR_TIMER", "true")
 	if err != nil {
-		t.Fatalf("Failed to set GOSTATS_TIMER_RESERVOIR_SIZE environment variable: %s", err)
+		t.Fatalf("Failed to set GOSTATS_USE_RESERVOIR_TIMER environment variable: %s", err)
 	}
 
 	expectedStatCount := 50
@@ -288,13 +289,13 @@ func TestTimerReservoir_NotFull(t *testing.T) {
 		}
 	}
 
-	os.Unsetenv("GOSTATS_TIMER_RESERVOIR_SIZE")
+	os.Unsetenv("GOSTATS_USE_RESERVOIR_TIMER")
 }
 
 func TestTimerReservoir_IndependantReservoirs(t *testing.T) {
-	err := os.Setenv("GOSTATS_TIMER_RESERVOIR_SIZE", "100")
+	err := os.Setenv("GOSTATS_USE_RESERVOIR_TIMER", "true")
 	if err != nil {
-		t.Fatalf("Failed to set GOSTATS_TIMER_RESERVOIR_SIZE environment variable: %s", err)
+		t.Fatalf("Failed to set GOSTATS_USE_RESERVOIR_TIMER environment variable: %s", err)
 	}
 
 	expectedStatCount := 1000
@@ -329,13 +330,13 @@ func TestTimerReservoir_IndependantReservoirs(t *testing.T) {
 		}
 	}
 
-	os.Unsetenv("GOSTATS_TIMER_RESERVOIR_SIZE")
+	os.Unsetenv("GOSTATS_USE_RESERVOIR_TIMER")
 }
 
 func TestTimerReservoir_ReusedStore(t *testing.T) {
-	err := os.Setenv("GOSTATS_TIMER_RESERVOIR_SIZE", "100")
+	err := os.Setenv("GOSTATS_USE_RESERVOIR_TIMER", "true")
 	if err != nil {
-		t.Fatalf("Failed to set GOSTATS_TIMER_RESERVOIR_SIZE environment variable: %s", err)
+		t.Fatalf("Failed to set GOSTATS_USE_RESERVOIR_TIMER environment variable: %s", err)
 	}
 
 	expectedStatCount := 100
@@ -403,7 +404,7 @@ func TestTimerReservoir_ReusedStore(t *testing.T) {
 		}
 	}
 
-	os.Unsetenv("GOSTATS_TIMER_RESERVOIR_SIZE")
+	os.Unsetenv("GOSTATS_USE_RESERVOIR_TIMER")
 }
 
 // Ensure 0 counters are not flushed

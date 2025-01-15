@@ -2,7 +2,6 @@ package stats
 
 import (
 	"context"
-	"math/bits"
 	"strconv"
 	"sync"
 	"sync/atomic"
@@ -354,11 +353,10 @@ type reservoirTimer struct {
 	mu       sync.Mutex
 	base     time.Duration
 	name     string
-	ringSize int
+	ringSize int // just used so that we don't have to re-evaluate capacity of values
 	ringMask int
 	values   []float64
 	count    int
-	overflow int
 }
 
 func (t *reservoirTimer) time(dur time.Duration) {
@@ -373,14 +371,7 @@ func (t *reservoirTimer) AddValue(value float64) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 
-	t.values[t.overflow&t.ringMask] = value
-	t.overflow++
-
-	// todo: can i optimize this with xor?
-	if t.overflow == t.ringSize {
-		t.overflow = 0
-	}
-
+	t.values[t.count&t.ringMask] = value
 	t.count++
 }
 
@@ -413,7 +404,7 @@ func (t *reservoirTimer) SampleRate() float64 {
 	if t.count <= t.ringSize {
 		return 1.0
 	}
-	return float64(t.ringSize) / float64(t.count) // todo: is it worth it to use t.ringSize instead of computing len of values worth it?
+	return float64(t.ringSize) / float64(t.count)
 }
 
 func (t *reservoirTimer) Reset() {
@@ -421,7 +412,6 @@ func (t *reservoirTimer) Reset() {
 	defer t.mu.Unlock()
 
 	t.count = 0 // this will imply a 0.0 sample rate until it's increased
-	t.overflow = 0
 }
 
 type timespan struct {
@@ -618,15 +608,13 @@ func (s *statStore) newTimer(serializedName string, base time.Duration) timer {
 	}
 
 	var t timer
-	if s.conf.isTimerReservoirEnabled() {
-		capacity := s.conf.TimerReservoirSize
-		capacityRoundedToTheNextPowerOfTwo := 1 << bits.Len(uint(capacity))
+	if s.conf.UseReservoirTimer {
 		t = &reservoirTimer{
 			name:     serializedName,
 			base:     base,
-			ringSize: capacity,
-			ringMask: capacityRoundedToTheNextPowerOfTwo - 1,
-			values:   make([]float64, capacity),
+			ringSize: DefaultTimerReservoirSize,
+			ringMask: DefaultTimerReservoirSize - 1,
+			values:   make([]float64, DefaultTimerReservoirSize),
 		}
 	} else {
 		t = &standardTimer{

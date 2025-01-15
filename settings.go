@@ -20,7 +20,8 @@ const (
 	DefaultFlushIntervalS = 5
 	// DefaultLoggingSinkDisabled is the default behavior of logging sink suppression, default is false.
 	DefaultLoggingSinkDisabled = false
-	DefaultTimerReservoirSize  = 0
+	DefaultUseReservoirTimer   = false // DefaultUseReservoirTimer defines if reservoir timers should be used by default, default is false.
+	DefaultTimerReservoirSize  = 128   // DefaultTimerReservoirSize is the max capacity of the reservoir for reservoir timers. needs to be rounded to a power of two e.g. 1 << bits.Len(uint(100)) = 128
 )
 
 // The Settings type is used to configure gostats. gostats uses environment
@@ -39,7 +40,8 @@ type Settings struct {
 	// Disable the LoggingSink when USE_STATSD is false and use the NullSink instead.
 	// This will cause all stats to be silently dropped.
 	LoggingSinkDisabled bool `envconfig:"GOSTATS_LOGGING_SINK_DISABLED" default:"false"`
-	TimerReservoirSize  int  `envconfig:"GOSTATS_TIMER_RESERVOIR_SIZE" default:"0"`
+	// Enable all timers to act as reservoir timers with sampling
+	UseReservoirTimer bool `envconfig:"GOSTATS_USE_RESERVOIR_TIMER" default:"false"`
 }
 
 // An envError is an error that occurred parsing an environment variable
@@ -103,7 +105,7 @@ func GetSettings() Settings {
 	if err != nil {
 		panic(err)
 	}
-	timerReservoirSize, err := envInt("GOSTATS_TIMER_RESERVOIR_SIZE", DefaultTimerReservoirSize)
+	useReservoirTimer, err := envBool("GOSTATS_USE_RESERVOIR_TIMER", DefaultUseReservoirTimer)
 	if err != nil {
 		panic(err)
 	}
@@ -114,15 +116,11 @@ func GetSettings() Settings {
 		StatsdPort:          statsdPort,
 		FlushIntervalS:      flushIntervalS,
 		LoggingSinkDisabled: loggingSinkDisabled,
-		TimerReservoirSize:  timerReservoirSize,
+		UseReservoirTimer:   useReservoirTimer,
 	}
 }
 
 // FlushInterval returns the flush interval duration.
 func (s *Settings) FlushInterval() time.Duration {
 	return time.Duration(s.FlushIntervalS) * time.Second
-}
-
-func (s *Settings) isTimerReservoirEnabled() bool {
-	return s.TimerReservoirSize > 0
 }
