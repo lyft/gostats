@@ -24,7 +24,7 @@ const (
 	DefaultUseReservoirTimer = false
 	// FixedTimerReservoirSize is the max capacity of the reservoir for reservoir timers.
 	// note: needs to be rounded to a power of two e.g. 1 << bits.Len(uint(100)) = 128
-	// todo: see if it's worth efficency trade off to reduce tech debt of this magic number and allowing any number.
+	// todo: see if it's worth an efficiency trade off to reduce tech debt of this magic number and allowing any number.
 	//       we could determine the difference between the defined size and next power of two
 	//       and use that to offset the counter when ANDing it against the mask,
 	//       once the result is 0 we just increment offset by "original offset"
