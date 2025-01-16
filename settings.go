@@ -20,7 +20,7 @@ const (
 	DefaultFlushIntervalS = 5
 	// DefaultLoggingSinkDisabled is the default behavior of logging sink suppression, default is false.
 	DefaultLoggingSinkDisabled = false
-	// DefaultUseReservoirTimer defines if reservoir timers should be used by default, default is false.
+	// DefaultUseReservoirTimer defines if all timers should be reservoir timers by default.
 	DefaultUseReservoirTimer = false
 	// FixedTimerReservoirSize is the max capacity of the reservoir for reservoir timers.
 	// note: needs to be rounded to a power of two e.g. 1 << bits.Len(uint(100)) = 128
@@ -44,7 +44,7 @@ type Settings struct {
 	// Disable the LoggingSink when USE_STATSD is false and use the NullSink instead.
 	// This will cause all stats to be silently dropped.
 	LoggingSinkDisabled bool `envconfig:"GOSTATS_LOGGING_SINK_DISABLED" default:"false"`
-	// Enable all timers to act as reservoir timers with sampling
+	// Make all timers reservoir timers with implied sampling under flush interval of FlushIntervalS
 	UseReservoirTimer bool `envconfig:"GOSTATS_USE_RESERVOIR_TIMER" default:"false"`
 }
 
