@@ -516,6 +516,8 @@ func (s *statStore) Flush() {
 
 	s.timers.Range(func(key, v interface{}) bool {
 		if timer, ok := v.(*reservoirTimer); ok {
+			// todo: this locking is uncessary, rewrite reservoirTimer to return all values and clear the counter and unlock right away, we can calculate sample rate here
+
 			// lock while flushing to:
 			// 1. provide correct sample rate
 			// 2. allow for exit despite continuous writes
