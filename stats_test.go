@@ -181,7 +181,6 @@ func TestTimerReservoir_Overflow(t *testing.T) {
 	ts, sink := setupTestNetSink(t, "tcp", false)
 	store := newStatStore(sink, true, GetSettings())
 
-	// this should equate to a 0.1 sample rate; 0.1 * 1280 = 128
 	for i := 0; i < statsToSend; i++ {
 		store.NewTimer("test").AddValue(float64(i % 10))
 	}
@@ -414,7 +413,71 @@ func TestTimerReservoir_ReusedStore(t *testing.T) {
 	os.Unsetenv("GOSTATS_USE_RESERVOIR_TIMER")
 }
 
-// todo: add test coverage for NewDefaultStore and the automatic flush loop
+func TestTimerReservoir_AutomaticFlush(t *testing.T) {
+	err := os.Setenv("GOSTATS_USE_RESERVOIR_TIMER", "true")
+	if err != nil {
+		t.Fatalf("Failed to set GOSTATS_USE_RESERVOIR_TIMER environment variable: %s", err)
+	}
+
+	flushIntervalS := 5
+	expectedStatCount := FixedTimerReservoirSize * 2
+
+	ts, sink := setupTestNetSink(t, "tcp", false)
+	store := newStatStore(sink, true, GetSettings())
+
+	ctx, cancel := context.WithCancel(context.Background())
+
+	wg := &sync.WaitGroup{}
+
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		store.StartContext(ctx, time.NewTicker(time.Duration(flushIntervalS)*time.Second))
+	}()
+
+	// first reservoir timer
+	statsToSend := FixedTimerReservoirSize
+	for i := 0; i < statsToSend; i++ {
+		store.NewTimer("test1").AddValue(float64(i % 10))
+	}
+
+	// second reservoir timer
+	statsToSend = FixedTimerReservoirSize * 3
+	for i := 0; i < statsToSend; i++ {
+		store.NewTimer("test2").AddValue(float64(i % 10))
+	}
+
+	if ts.String() != "" {
+		t.Errorf("Stats were written pre flush invalidating the test")
+	}
+
+	time.Sleep(time.Duration(flushIntervalS+1) * time.Second) // increment a second to allow the flush to happen
+
+	stats := strings.Split(ts.String(), "\n")
+	statCount := len(stats) - 1 // there will be 1 extra new line character at the end of the buffer
+	if statCount != expectedStatCount {
+		t.Errorf("Not all stats were written\ngot: %d\nwanted: %d", statCount, expectedStatCount)
+	}
+
+	stats = stats[:statCount]
+	for _, stat := range stats {
+		name := strings.Split(stat, ":")[0]
+		value := strings.Split(stat, ":")[1]
+		sampleRate := strings.Split(value, ("|@"))[1]
+		if name == "test1" && sampleRate != "1.00" {
+			t.Errorf("The test1 stat was written without a 1.00 sample rate: %s", stat)
+		} else if name == "test2" && sampleRate != "0.33" {
+			t.Errorf("The test2 stat was written without a 0.33 sample rate: %s", stat)
+		} else if name != "test1" && name != "test2" {
+			t.Errorf("A unknown stat was written: %s", stat)
+		}
+	}
+
+	cancel()
+	wg.Wait()
+
+	os.Unsetenv("GOSTATS_USE_RESERVOIR_TIMER")
+}
 
 // Ensure 0 counters are not flushed
 func TestZeroCounters(t *testing.T) {

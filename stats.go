@@ -387,9 +387,9 @@ func (t *reservoirTimer) AddValue(value float64) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 
-	// direct access to t.count and t.ringMask is protected by the mutex
-	t.values[t.count&t.ringMask] = value
-	t.count++
+	// t.ringMask isn't ever changed and accessing it here is protected by the mutex
+	t.values[atomic.LoadUint64(&t.count)&t.ringMask] = value
+	atomic.AddUint64(&t.count, 1)
 }
 
 func (t *reservoirTimer) AllocateSpan() Timespan {
