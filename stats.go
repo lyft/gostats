@@ -609,9 +609,9 @@ func (s *statStore) newTimer(serializedName string, base time.Duration) timer {
 		t = &reservoirTimer{
 			name:     serializedName,
 			base:     base,
-			ringSize: DefaultTimerReservoirSize,
-			ringMask: DefaultTimerReservoirSize - 1,
-			values:   make([]float64, DefaultTimerReservoirSize),
+			ringSize: FixedTimerReservoirSize,
+			ringMask: FixedTimerReservoirSize - 1,
+			values:   make([]float64, FixedTimerReservoirSize),
 		}
 	} else {
 		t = &standardTimer{

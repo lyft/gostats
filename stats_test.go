@@ -134,12 +134,13 @@ func TestTimerReservoir_Disabled(t *testing.T) {
 		t.Fatalf("Failed to set GOSTATS_USE_RESERVOIR_TIMER environment variable: %s", err)
 	}
 
-	expectedStatCount := 1000
+	statsToSend := FixedTimerReservoirSize * 3
+	expectedStatCount := statsToSend
 
 	ts, sink := setupTestNetSink(t, "tcp", false)
 	store := NewStore(sink, true)
 
-	for i := 0; i < 1000; i++ {
+	for i := 0; i < statsToSend; i++ {
 		store.NewTimer("test").AddValue(float64(i % 10))
 	}
 
@@ -174,13 +175,14 @@ func TestTimerReservoir_Overflow(t *testing.T) {
 		t.Fatalf("Failed to set GOSTATS_USE_RESERVOIR_TIMER environment variable: %s", err)
 	}
 
-	expectedStatCount := 128 // reservoir size
+	statsToSend := FixedTimerReservoirSize * 3
+	expectedStatCount := FixedTimerReservoirSize
 
 	ts, sink := setupTestNetSink(t, "tcp", false)
 	store := NewStore(sink, true)
 
 	// this should equate to a 0.1 sample rate; 0.1 * 1280 = 128
-	for i := 0; i < 1280; i++ {
+	for i := 0; i < statsToSend; i++ {
 		store.NewTimer("test").AddValue(float64(i % 10))
 	}
 
@@ -202,8 +204,8 @@ func TestTimerReservoir_Overflow(t *testing.T) {
 	for _, stat := range stats {
 		value := strings.Split(stat, ":")[1]
 		sampleRate := strings.Split(value, ("|@"))[1]
-		if sampleRate != "0.10" {
-			t.Errorf("A stat was written without a 0.10 sample rate: %s", stat)
+		if sampleRate != "0.33" {
+			t.Errorf("A stat was written without a 0.33 sample rate: %s", stat)
 		}
 	}
 
@@ -216,12 +218,13 @@ func TestTimerReservoir_Full(t *testing.T) {
 		t.Fatalf("Failed to set GOSTATS_USE_RESERVOIR_TIMER environment variable: %s", err)
 	}
 
-	expectedStatCount := 128 // reservoir size
+	statsToSend := FixedTimerReservoirSize
+	expectedStatCount := statsToSend
 
 	ts, sink := setupTestNetSink(t, "tcp", false)
 	store := NewStore(sink, true)
 
-	for i := 0; i < 128; i++ {
+	for i := 0; i < statsToSend; i++ {
 		store.NewTimer("test").AddValue(float64(i % 10))
 	}
 
@@ -257,12 +260,13 @@ func TestTimerReservoir_NotFull(t *testing.T) {
 		t.Fatalf("Failed to set GOSTATS_USE_RESERVOIR_TIMER environment variable: %s", err)
 	}
 
-	expectedStatCount := 50
+	statsToSend := FixedTimerReservoirSize / 2
+	expectedStatCount := statsToSend
 
 	ts, sink := setupTestNetSink(t, "tcp", false)
 	store := NewStore(sink, true)
 
-	for i := 0; i < 50; i++ {
+	for i := 0; i < statsToSend; i++ {
 		store.NewTimer("test").AddValue(float64(i % 10))
 	}
 
@@ -298,12 +302,13 @@ func TestTimerReservoir_IndependantReservoirs(t *testing.T) {
 		t.Fatalf("Failed to set GOSTATS_USE_RESERVOIR_TIMER environment variable: %s", err)
 	}
 
-	expectedStatCount := 1000
+	statsToSend := FixedTimerReservoirSize * 3
+	expectedStatCount := statsToSend
 
 	ts, sink := setupTestNetSink(t, "tcp", false)
 	store := NewStore(sink, true)
 
-	for i := 0; i < 1000; i++ {
+	for i := 0; i < statsToSend; i++ {
 		store.NewTimer("test" + strconv.Itoa(i)).AddValue(float64(i % 10)) // use different names so that we don't conflate the metrics into the same reservoir
 	}
 
@@ -339,12 +344,13 @@ func TestTimerReservoir_ReusedStore(t *testing.T) {
 		t.Fatalf("Failed to set GOSTATS_USE_RESERVOIR_TIMER environment variable: %s", err)
 	}
 
-	expectedStatCount := 100
+	statsToSend := FixedTimerReservoirSize / 2
+	expectedStatCount := statsToSend
 
 	ts, sink := setupTestNetSink(t, "tcp", false)
 	store := NewStore(sink, true)
 
-	for i := 0; i < 100; i++ {
+	for i := 0; i < statsToSend; i++ {
 		store.NewTimer("test").AddValue(float64(i % 10))
 	}
 
@@ -375,9 +381,10 @@ func TestTimerReservoir_ReusedStore(t *testing.T) {
 		t.Errorf("Sink hasn't been cleared")
 	}
 
-	expectedStatCount = 50
+	statsToSend = FixedTimerReservoirSize
+	expectedStatCount = statsToSend
 
-	for i := 0; i < 50; i++ {
+	for i := 0; i < statsToSend; i++ {
 		store.NewTimer("test").AddValue(float64(i % 10))
 	}
 

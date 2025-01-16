@@ -20,8 +20,12 @@ const (
 	DefaultFlushIntervalS = 5
 	// DefaultLoggingSinkDisabled is the default behavior of logging sink suppression, default is false.
 	DefaultLoggingSinkDisabled = false
-	DefaultUseReservoirTimer   = false // DefaultUseReservoirTimer defines if reservoir timers should be used by default, default is false.
-	DefaultTimerReservoirSize  = 128   // DefaultTimerReservoirSize is the max capacity of the reservoir for reservoir timers. needs to be rounded to a power of two e.g. 1 << bits.Len(uint(100)) = 128
+	// DefaultUseReservoirTimer defines if reservoir timers should be used by default, default is false.
+	DefaultUseReservoirTimer = false
+	// FixedTimerReservoirSize is the max capacity of the reservoir for reservoir timers.
+	// note: needs to be rounded to a power of two e.g. 1 << bits.Len(uint(100)) = 128
+	// todo: see if we can use not-strict number and just account for the offset
+	FixedTimerReservoirSize = 128
 )
 
 // The Settings type is used to configure gostats. gostats uses environment
