@@ -493,7 +493,7 @@ func (s *statStore) Flush() {
 
 			// since the map memory is reused only process what we accumulated in the current processing itteration
 			for i := 0; i < timer.ValueCount(); i++ {
-				s.sink.FlushAggregatedTimer(key.(string), timer.GetValue(i), sampleRate)
+				s.sink.FlushSampledTimer(key.(string), timer.GetValue(i), sampleRate)
 			}
 
 			timer.Reset()

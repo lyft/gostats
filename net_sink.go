@@ -260,25 +260,46 @@ func (s *netSink) FlushGauge(name string, value uint64) {
 }
 
 func (s *netSink) FlushTimer(name string, value float64) {
-	s.flushFloatOptimized(name, "|ms\n", value)
-}
-
-func (s *netSink) FlushAggregatedTimer(name string, value, sampleRate float64) {
-	// todo: this can be further optimized by strconv.AppendFloat directly to the buffer in flush(Uint|Float)64 however we would need more conditions or code duplication
-	suffix := "|ms|@" + strconv.FormatFloat(sampleRate, 'f', 2, 64) + "\n" // todo: deteremine how many decimal places we need
-	s.flushFloatOptimized(name, suffix, value)
-}
-
-func (s *netSink) flushFloatOptimized(name, suffix string, value float64) {
-	// Since we historitically used floating point values to represent time
-	// durations, metrics (particularly timers) are often recorded as an integer encoded as a
+	// Since we mistakenly use floating point values to represent time
+	// durations this method is often passed an integer encoded as a
 	// float. Formatting integers is much faster (>2x) than formatting
-	// floats, so we should convert to an integer whenever possible.
+	// floats so use integer formatting whenever possible.
+	//
 	if 0 <= value && value < math.MaxUint64 && math.Trunc(value) == value {
-		s.flushUint64(name, suffix, uint64(value))
+		s.flushUint64(name, "|ms\n", uint64(value))
 	} else {
-		s.flushFloat64(name, suffix, value)
+		s.flushFloat64(name, "|ms\n", value)
 	}
+}
+
+func (s *netSink) FlushSampledTimer(name string, value, sampleRate float64) {
+	timerSuffix := "|ms"
+	sampleSuffix := "|@"
+	metricSuffix := "\n"
+
+	// todo: see if we can dedup code here without the expense of efficiency
+	var writeValue func(*buffer)
+	if 0 <= value && value < math.MaxUint64 && math.Trunc(value) == value {
+		writeValue = func(b *buffer) { b.WriteUnit64(uint64(value)) }
+	} else {
+		writeValue = func(b *buffer) { b.WriteFloat64(value) }
+	}
+
+	b := pbFree.Get().(*buffer)
+
+	b.WriteString(name)
+	b.WriteChar(':')
+	writeValue(b)
+	b.WriteString(timerSuffix)
+
+	b.WriteString(sampleSuffix)
+	b.writeFloat64WithPercision(sampleRate, 2) // todo: deteremine how many decimal places we need
+	b.WriteString(metricSuffix)
+
+	s.writeBuffer(b)
+
+	b.Reset()
+	pbFree.Put(b)
 }
 
 func (s *netSink) run() {
@@ -426,5 +447,9 @@ func (b *buffer) WriteUnit64(val uint64) {
 }
 
 func (b *buffer) WriteFloat64(val float64) {
-	*b = strconv.AppendFloat(*b, val, 'f', 6, 64)
+	b.writeFloat64WithPercision(val, 6)
+}
+
+func (b *buffer) writeFloat64WithPercision(val float64, precision int) {
+	*b = strconv.AppendFloat(*b, val, 'f', precision, 64)
 }

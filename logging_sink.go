@@ -92,7 +92,7 @@ func (s *loggingSink) FlushGauge(name string, value uint64) { s.log(name, "gauge
 
 func (s *loggingSink) FlushTimer(name string, value float64) { s.log(name, "timer", value) }
 
-func (s *loggingSink) FlushAggregatedTimer(name string, value, _ float64) {
+func (s *loggingSink) FlushSampledTimer(name string, value, _ float64) {
 	s.FlushTimer(name, value)
 }
 
