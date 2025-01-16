@@ -507,7 +507,7 @@ func TestTimerReservoir_ConcurrentFlushingWhileWrites(t *testing.T) {
 		time.Sleep(time.Duration(flushIntervalMs/5) * time.Millisecond)
 	}
 
-	time.Sleep(time.Duration(flushIntervalMs+1) * time.Millisecond) // guarentee we finish flushing
+	time.Sleep(time.Duration(flushIntervalMs+1) * time.Millisecond) // guarantee we finish flushing
 
 	stats := strings.Split(ts.String(), "\n")
 	statCount := len(stats) - 1 // there will be 1 extra new line character at the end of the buffer
