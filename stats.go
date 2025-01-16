@@ -319,15 +319,15 @@ const (
 
 type timer interface {
 	time(time.Duration)
+	lock()
+	unlock()
+	reset()
 	AddDuration(time.Duration)
 	AddValue(float64)
 	AllocateSpan() Timespan
 	GetValue(int) float64
 	ValueCount() int
 	SampleRate() float64
-	Lock()
-	Unlock()
-	Reset()
 }
 
 type standardTimer struct {
@@ -365,13 +365,13 @@ func (t *standardTimer) SampleRate() float64 {
 }
 
 // no support or need for concurrency
-func (t *standardTimer) Lock() {}
+func (t *standardTimer) lock() {}
 
 // no support or need for concurrency
-func (t *standardTimer) Unlock() {}
+func (t *standardTimer) unlock() {}
 
 // nothing to persisted in memroy for this timer
-func (t *standardTimer) Reset() {}
+func (t *standardTimer) reset() {}
 
 type reservoirTimer struct {
 	mu       sync.Mutex
@@ -427,15 +427,15 @@ func (t *reservoirTimer) SampleRate() float64 {
 	return float64(ringSize) / float64(count)
 }
 
-func (t *reservoirTimer) Lock() {
+func (t *reservoirTimer) lock() {
 	t.mu.Lock()
 }
 
-func (t *reservoirTimer) Unlock() {
+func (t *reservoirTimer) unlock() {
 	t.mu.Unlock()
 }
 
-func (t *reservoirTimer) Reset() {
+func (t *reservoirTimer) reset() {
 	atomic.StoreUint64(&t.count, 0)
 }
 
@@ -520,7 +520,7 @@ func (s *statStore) Flush() {
 			// 1. provide correct sample rate
 			// 2. allow for exit despite continuous writes
 			// 3. reduce metric loss from writes after flush and before reset
-			timer.Lock()
+			timer.lock()
 			sampleRate := timer.SampleRate()
 
 			// since the map memory is reused only process what we accumulated in the current processing itteration
@@ -528,8 +528,8 @@ func (s *statStore) Flush() {
 				s.sink.FlushSampledTimer(key.(string), timer.GetValue(i), sampleRate)
 			}
 
-			timer.Reset()
-			timer.Unlock()
+			timer.reset()
+			timer.unlock()
 		}
 
 		return true
