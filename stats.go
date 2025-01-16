@@ -387,7 +387,7 @@ func (t *reservoirTimer) AddValue(value float64) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 
-	// t.ringMask isn't ever changed and accessing it here is protected by the mutex
+	// t.ringMask isn't ever changed so the access to should fine
 	t.values[atomic.LoadUint64(&t.count)&t.ringMask] = value
 	atomic.AddUint64(&t.count, 1)
 }
