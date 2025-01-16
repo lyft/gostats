@@ -138,7 +138,7 @@ func TestTimerReservoir_Disabled(t *testing.T) {
 	expectedStatCount := statsToSend
 
 	ts, sink := setupTestNetSink(t, "tcp", false)
-	store := NewStore(sink, true)
+	store := newStatStore(sink, true, GetSettings())
 
 	for i := 0; i < statsToSend; i++ {
 		store.NewTimer("test").AddValue(float64(i % 10))
@@ -179,7 +179,7 @@ func TestTimerReservoir_Overflow(t *testing.T) {
 	expectedStatCount := FixedTimerReservoirSize
 
 	ts, sink := setupTestNetSink(t, "tcp", false)
-	store := NewStore(sink, true)
+	store := newStatStore(sink, true, GetSettings())
 
 	// this should equate to a 0.1 sample rate; 0.1 * 1280 = 128
 	for i := 0; i < statsToSend; i++ {
@@ -222,7 +222,7 @@ func TestTimerReservoir_Full(t *testing.T) {
 	expectedStatCount := statsToSend
 
 	ts, sink := setupTestNetSink(t, "tcp", false)
-	store := NewStore(sink, true)
+	store := newStatStore(sink, true, GetSettings())
 
 	for i := 0; i < statsToSend; i++ {
 		store.NewTimer("test").AddValue(float64(i % 10))
@@ -264,7 +264,7 @@ func TestTimerReservoir_NotFull(t *testing.T) {
 	expectedStatCount := statsToSend
 
 	ts, sink := setupTestNetSink(t, "tcp", false)
-	store := NewStore(sink, true)
+	store := newStatStore(sink, true, GetSettings())
 
 	for i := 0; i < statsToSend; i++ {
 		store.NewTimer("test").AddValue(float64(i % 10))
@@ -306,7 +306,7 @@ func TestTimerReservoir_IndependantReservoirs(t *testing.T) {
 	expectedStatCount := statsToSend
 
 	ts, sink := setupTestNetSink(t, "tcp", false)
-	store := NewStore(sink, true)
+	store := newStatStore(sink, true, GetSettings())
 
 	for i := 0; i < statsToSend; i++ {
 		store.NewTimer("test" + strconv.Itoa(i)).AddValue(float64(i % 10)) // use different names so that we don't conflate the metrics into the same reservoir
@@ -348,7 +348,7 @@ func TestTimerReservoir_ReusedStore(t *testing.T) {
 	expectedStatCount := statsToSend
 
 	ts, sink := setupTestNetSink(t, "tcp", false)
-	store := NewStore(sink, true)
+	store := newStatStore(sink, true, GetSettings())
 
 	for i := 0; i < statsToSend; i++ {
 		store.NewTimer("test").AddValue(float64(i % 10))
@@ -413,6 +413,8 @@ func TestTimerReservoir_ReusedStore(t *testing.T) {
 
 	os.Unsetenv("GOSTATS_USE_RESERVOIR_TIMER")
 }
+
+// todo: add test coverage for NewDefaultStore and the automatic flush loop
 
 // Ensure 0 counters are not flushed
 func TestZeroCounters(t *testing.T) {

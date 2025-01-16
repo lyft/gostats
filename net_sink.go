@@ -293,7 +293,7 @@ func (s *netSink) FlushSampledTimer(name string, value, sampleRate float64) {
 	b.WriteString(timerSuffix)
 
 	b.WriteString(sampleSuffix)
-	b.writeFloat64WithPercision(sampleRate, 2) // todo: deteremine how many decimal places we need
+	b.writeFloat64WithPrecision(sampleRate, 2) // todo: deteremine how many decimal places we need
 	b.WriteString(metricSuffix)
 
 	s.writeBuffer(b)
@@ -447,9 +447,9 @@ func (b *buffer) WriteUnit64(val uint64) {
 }
 
 func (b *buffer) WriteFloat64(val float64) {
-	b.writeFloat64WithPercision(val, 6)
+	b.writeFloat64WithPrecision(val, 6)
 }
 
-func (b *buffer) writeFloat64WithPercision(val float64, precision int) {
+func (b *buffer) writeFloat64WithPrecision(val float64, precision int) {
 	*b = strconv.AppendFloat(*b, val, 'f', precision, 64)
 }

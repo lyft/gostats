@@ -215,24 +215,33 @@ type StatGenerator interface {
 // Note: the export argument is unused.
 func NewStore(sink Sink, _ bool) Store {
 	return &statStore{
-		sink: sink,
-		conf: GetSettings(), // todo: right now the environment is being loaded in multiple places and can be made more efficient by computing it once and storing for subsequent gets
+		sink:      sink,
+		timerType: standard,
 	}
 }
 
+func newStatStore(sink Sink, export bool, conf Settings) *statStore {
+	store := NewStore(sink, export).(*statStore)
+	if conf.UseReservoirTimer {
+		store.timerType = reservoir
+	}
+	return store
+}
+
 // NewDefaultStore returns a Store with a TCP statsd sink, and a running flush timer.
+// note: this is the only way to use reservoir timers as they rely on the store flush loop
 func NewDefaultStore() Store {
 	var newStore Store
 	settings := GetSettings()
 	if !settings.UseStatsd {
 		if settings.LoggingSinkDisabled {
-			newStore = NewStore(NewNullSink(), false)
+			newStore = newStatStore(NewNullSink(), false, settings)
 		} else {
-			newStore = NewStore(NewLoggingSink(), false)
+			newStore = newStatStore(NewLoggingSink(), false, settings)
 		}
 		go newStore.Start(time.NewTicker(10 * time.Second))
 	} else {
-		newStore = NewStore(NewTCPStatsdSink(), false)
+		newStore = newStatStore(NewTCPStatsdSink(), false, settings)
 		go newStore.Start(time.NewTicker(time.Duration(settings.FlushIntervalS) * time.Second))
 	}
 	return newStore
@@ -300,6 +309,13 @@ func (c *gauge) Set(value uint64) {
 func (c *gauge) Value() uint64 {
 	return atomic.LoadUint64(&c.value)
 }
+
+type timerType int
+
+const (
+	standard timerType = iota
+	reservoir
+)
 
 type timer interface {
 	time(time.Duration)
@@ -428,16 +444,15 @@ func (ts *timespan) CompleteWithDuration(value time.Duration) {
 
 type statStore struct {
 	// these maps may grow indefinitely however slots in this maps are reused as stats names are stable over the lifetime of the process
-	counters sync.Map
-	gauges   sync.Map
-	timers   sync.Map
+	counters  sync.Map
+	gauges    sync.Map
+	timers    sync.Map
+	timerType timerType
 
 	mu             sync.RWMutex
 	statGenerators []StatGenerator
 
 	sink Sink
-
-	conf Settings
 }
 
 var ReservedTagWords = map[string]bool{"asg": true, "az": true, "backend": true, "canary": true, "host": true, "period": true, "region": true, "shard": true, "window": true, "source": true, "project": true, "facet": true, "envoyservice": true}
@@ -605,7 +620,8 @@ func (s *statStore) newTimer(serializedName string, base time.Duration) timer {
 	}
 
 	var t timer
-	if s.conf.UseReservoirTimer {
+	switch s.timerType {
+	case reservoir:
 		t = &reservoirTimer{
 			name:     serializedName,
 			base:     base,
@@ -613,7 +629,9 @@ func (s *statStore) newTimer(serializedName string, base time.Duration) timer {
 			ringMask: FixedTimerReservoirSize - 1,
 			values:   make([]float64, FixedTimerReservoirSize),
 		}
-	} else {
+	case standard: // this should allow backward compatible a backwards compatible fallback as standard is the zero value of s.timerType
+		fallthrough
+	default:
 		t = &standardTimer{
 			name: serializedName,
 			sink: s.sink,
