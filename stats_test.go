@@ -485,7 +485,7 @@ func TestTimerReservoir_ConcurrentFlushingWhileWrites(t *testing.T) {
 		t.Fatalf("Failed to set GOSTATS_USE_RESERVOIR_TIMER environment variable: %s", err)
 	}
 
-	flushIntervalMs := 5
+	flushIntervalMS := 5
 	expectedStatCount := FixedTimerReservoirSize * 2
 
 	ts, sink := setupTestNetSink(t, "tcp", false)
@@ -498,16 +498,16 @@ func TestTimerReservoir_ConcurrentFlushingWhileWrites(t *testing.T) {
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		store.StartContext(ctx, time.NewTicker(time.Duration(flushIntervalMs)*time.Millisecond))
+		store.StartContext(ctx, time.NewTicker(time.Duration(flushIntervalMS)*time.Millisecond))
 	}()
 
 	statsToSend := expectedStatCount
 	for i := 0; i < statsToSend; i++ {
 		store.NewTimer("test").AddValue(float64(i % 10))
-		time.Sleep(time.Duration(flushIntervalMs/5) * time.Millisecond)
+		time.Sleep(time.Duration(flushIntervalMS/5) * time.Millisecond)
 	}
 
-	time.Sleep(time.Duration(flushIntervalMs+1) * time.Millisecond) // guarantee we finish flushing
+	time.Sleep(time.Duration(flushIntervalMS+1) * time.Millisecond) // guarantee we finish flushing
 
 	stats := strings.Split(ts.String(), "\n")
 	statCount := len(stats) - 1 // there will be 1 extra new line character at the end of the buffer

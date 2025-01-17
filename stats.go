@@ -319,15 +319,10 @@ const (
 
 type timer interface {
 	time(time.Duration)
-	lock()
-	unlock()
-	reset()
 	AddDuration(time.Duration)
 	AddValue(float64)
 	AllocateSpan() Timespan
-	GetValue(int) float64
-	ValueCount() int
-	SampleRate() float64
+	Empty() ([]float64, uint64)
 }
 
 type standardTimer struct {
@@ -352,33 +347,17 @@ func (t *standardTimer) AllocateSpan() Timespan {
 	return &timespan{timer: t, start: time.Now()}
 }
 
-func (t *standardTimer) GetValue(_ int) float64 {
-	return 0.0 // since we flush right away nothing will be collected
+// values are not collected for this timer
+func (t *standardTimer) Empty() ([]float64, uint64) {
+	return nil, 0
 }
-
-func (t *standardTimer) ValueCount() int {
-	return 0 // since we flush right away nothing will be collected
-}
-
-func (t *standardTimer) SampleRate() float64 {
-	return 1.0 // metrics which are not sampled have an implicit sample rate 1.0
-}
-
-// no support or need for concurrency
-func (t *standardTimer) lock() {}
-
-// no support or need for concurrency
-func (t *standardTimer) unlock() {}
-
-// nothing to persisted in memroy for this timer
-func (t *standardTimer) reset() {}
 
 type reservoirTimer struct {
 	mu       sync.Mutex
 	base     time.Duration
 	name     string
-	ringSize uint64 // this value shouldn't change, just used so that we don't have to re-evaluate capacity of values
-	ringMask uint64 // this value shouldn't change
+	RingSize uint64
+	ringMask uint64
 	values   []float64
 	count    uint64
 }
@@ -395,48 +374,36 @@ func (t *reservoirTimer) AddValue(value float64) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 
-	t.values[atomic.LoadUint64(&t.count)&t.ringMask] = value
-	atomic.AddUint64(&t.count, 1)
+	t.values[t.count&t.ringMask] = value
+	t.count++
 }
 
 func (t *reservoirTimer) AllocateSpan() Timespan {
 	return &timespan{timer: t, start: time.Now()}
 }
 
-func (t *reservoirTimer) GetValue(index int) float64 {
-	return t.values[index]
-}
-
-func (t *reservoirTimer) ValueCount() int {
-	count := atomic.LoadUint64(&t.count)
-	ringSize := t.ringSize
-
-	if count > ringSize {
-		return int(ringSize)
-	}
-	return int(count)
-}
-
-func (t *reservoirTimer) SampleRate() float64 {
-	count := atomic.LoadUint64(&t.count)
-	ringSize := t.ringSize
-
-	if count <= ringSize {
-		return 1.0
-	}
-	return float64(ringSize) / float64(count)
-}
-
-func (t *reservoirTimer) lock() {
+// resets the reservoir returning all valeus collected and a count of the total inflow,
+// including what exceeded the collection size and was dropped
+func (t *reservoirTimer) Empty() ([]float64, uint64) {
 	t.mu.Lock()
-}
+	defer t.mu.Unlock()
 
-func (t *reservoirTimer) unlock() {
-	t.mu.Unlock()
-}
+	count := t.count
 
-func (t *reservoirTimer) reset() {
-	atomic.StoreUint64(&t.count, 0)
+	var accumulation uint64
+	if count > t.RingSize {
+		accumulation = t.RingSize
+	} else {
+		accumulation = count
+	}
+
+	// make a copy to avoid data races
+	values := make([]float64, accumulation)
+	copy(values, t.values[:accumulation]) // since the slice memory is reused only copy what we accumulated in the current processing itteration
+
+	t.count = 0 // new values can start being written to the slice
+
+	return values, count
 }
 
 type timespan struct {
@@ -516,22 +483,19 @@ func (s *statStore) Flush() {
 
 	s.timers.Range(func(key, v interface{}) bool {
 		if timer, ok := v.(*reservoirTimer); ok {
-			// todo: this locking is uncessary, rewrite reservoirTimer to return all values and clear the counter and unlock right away, we can calculate sample rate here
+			values, count := timer.Empty()
+			reservoirSize := timer.RingSize
 
-			// lock while flushing to:
-			// 1. provide correct sample rate
-			// 2. allow for exit despite continuous writes
-			// 3. reduce metric loss from writes after flush and before reset
-			timer.lock()
-			sampleRate := timer.SampleRate()
-
-			// since the map memory is reused only process what we accumulated in the current processing itteration
-			for i := 0; i < timer.ValueCount(); i++ {
-				s.sink.FlushSampledTimer(key.(string), timer.GetValue(i), sampleRate)
+			var sampleRate float64
+			if count <= reservoirSize {
+				sampleRate = 1.0
+			} else {
+				sampleRate = float64(reservoirSize) / float64(count)
 			}
 
-			timer.reset()
-			timer.unlock()
+			for _, value := range values {
+				s.sink.FlushSampledTimer(key.(string), value, sampleRate)
+			}
 		}
 
 		return true
@@ -645,7 +609,7 @@ func (s *statStore) newTimer(serializedName string, base time.Duration) timer {
 		t = &reservoirTimer{
 			name:     serializedName,
 			base:     base,
-			ringSize: FixedTimerReservoirSize,
+			RingSize: FixedTimerReservoirSize,
 			ringMask: FixedTimerReservoirSize - 1,
 			values:   make([]float64, FixedTimerReservoirSize),
 		}
