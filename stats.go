@@ -2,6 +2,7 @@ package stats
 
 import (
 	"context"
+	"fmt"
 	"strconv"
 	"sync"
 	"sync/atomic"
@@ -496,6 +497,8 @@ func (s *statStore) Flush() {
 			for _, value := range values {
 				s.sink.FlushSampledTimer(key.(string), value, sampleRate)
 			}
+
+			fmt.Printf("Flushed %d timer samples for metric: %s", len(values), key.(string)) // todo: either remove or convert to debug logging
 		}
 
 		return true
@@ -613,6 +616,7 @@ func (s *statStore) newTimer(serializedName string, base time.Duration) timer {
 			ringMask: FixedTimerReservoirSize - 1,
 			values:   make([]float64, FixedTimerReservoirSize),
 		}
+		fmt.Printf("New reservoirTimer created") // todo: either remove or convert to debug logging
 	case standard: // this should allow backward compatible a backwards compatible fallback as standard is the zero value of s.timerType
 		fallthrough
 	default:
@@ -621,6 +625,7 @@ func (s *statStore) newTimer(serializedName string, base time.Duration) timer {
 			sink: s.sink,
 			base: base,
 		}
+		fmt.Printf("New standardTimer created") // todo: either remove or convert to debug logging
 	}
 
 	if v, loaded := s.timers.LoadOrStore(serializedName, t); loaded {
