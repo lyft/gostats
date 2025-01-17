@@ -2,7 +2,7 @@ package stats
 
 import (
 	"context"
-	"fmt"
+	"os"
 	"strconv"
 	"sync"
 	"sync/atomic"
@@ -218,6 +218,7 @@ func NewStore(sink Sink, _ bool) Store {
 	return &statStore{
 		sink:      sink,
 		timerType: standard,
+		log:       &loggingSink{writer: os.Stderr, now: time.Now}, // should always be initialized since this is not exported todo: not sure if we really need this
 	}
 }
 
@@ -433,6 +434,7 @@ type statStore struct {
 	statGenerators []StatGenerator
 
 	sink Sink
+	log  Logger
 }
 
 var ReservedTagWords = map[string]bool{"asg": true, "az": true, "backend": true, "canary": true, "host": true, "period": true, "region": true, "shard": true, "window": true, "source": true, "project": true, "facet": true, "envoyservice": true}
@@ -482,6 +484,9 @@ func (s *statStore) Flush() {
 		return true
 	})
 
+	flushedTimers := 0
+	skippedTimers := 0
+	flushedStats := 0
 	s.timers.Range(func(key, v interface{}) bool {
 		if timer, ok := v.(*reservoirTimer); ok {
 			values, count := timer.Empty()
@@ -498,11 +503,16 @@ func (s *statStore) Flush() {
 				s.sink.FlushSampledTimer(key.(string), value, sampleRate)
 			}
 
-			fmt.Printf("Flushed %d timer samples for metric: %s", len(values), key.(string)) // todo: either remove or convert to debug logging
+			flushedTimers++
+			flushedStats += len(values)
+		} else {
+			skippedTimers++
 		}
 
 		return true
 	})
+	s.log.Infof("Flushed %d timers including %d samples", flushedTimers, flushedStats) // todo: either remove or convert to debug logging
+	s.log.Infof("Ignored %d timers", skippedTimers)                                    // todo: either remove or convert to debug logging
 
 	flushableSink, ok := s.sink.(FlushableSink)
 	if ok {
@@ -616,7 +626,7 @@ func (s *statStore) newTimer(serializedName string, base time.Duration) timer {
 			ringMask: FixedTimerReservoirSize - 1,
 			values:   make([]float64, FixedTimerReservoirSize),
 		}
-		fmt.Printf("New reservoirTimer created") // todo: either remove or convert to debug logging
+		s.log.Infof("New reservoirTimer created") // todo: either remove or convert to debug logging
 	case standard: // this should allow backward compatible a backwards compatible fallback as standard is the zero value of s.timerType
 		fallthrough
 	default:
@@ -625,7 +635,7 @@ func (s *statStore) newTimer(serializedName string, base time.Duration) timer {
 			sink: s.sink,
 			base: base,
 		}
-		fmt.Printf("New standardTimer created") // todo: either remove or convert to debug logging
+		s.log.Infof("New standardTimer created") // todo: either remove or convert to debug logging
 	}
 
 	if v, loaded := s.timers.LoadOrStore(serializedName, t); loaded {

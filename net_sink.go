@@ -20,6 +20,7 @@ import (
 type Logger interface {
 	Errorf(msg string, args ...interface{})
 	Warnf(msg string, args ...interface{})
+	Infof(msg string, args ...interface{})
 }
 
 const (
