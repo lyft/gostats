@@ -356,8 +356,8 @@ type reservoirTimer struct {
 	mu       sync.Mutex
 	base     time.Duration
 	name     string
-	RingSize uint64
-	ringMask uint64
+	ringSize uint64 // immutable
+	ringMask uint64 // immutable
 	values   []float64
 	count    uint64
 }
@@ -391,8 +391,8 @@ func (t *reservoirTimer) Empty() ([]float64, uint64) {
 	count := t.count
 
 	var accumulation uint64
-	if count > t.RingSize {
-		accumulation = t.RingSize
+	if count > t.ringSize {
+		accumulation = t.ringSize
 	} else {
 		accumulation = count
 	}
@@ -484,7 +484,7 @@ func (s *statStore) Flush() {
 	s.timers.Range(func(key, v interface{}) bool {
 		if timer, ok := v.(*reservoirTimer); ok {
 			values, count := timer.Empty()
-			reservoirSize := timer.RingSize
+			reservoirSize := timer.ringSize // assuming this is immutable
 
 			var sampleRate float64
 			if count <= reservoirSize {
@@ -609,7 +609,7 @@ func (s *statStore) newTimer(serializedName string, base time.Duration) timer {
 		t = &reservoirTimer{
 			name:     serializedName,
 			base:     base,
-			RingSize: FixedTimerReservoirSize,
+			ringSize: FixedTimerReservoirSize,
 			ringMask: FixedTimerReservoirSize - 1,
 			values:   make([]float64, FixedTimerReservoirSize),
 		}
