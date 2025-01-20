@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"strconv"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -331,6 +332,7 @@ type standardTimer struct {
 	base time.Duration
 	name string
 	sink Sink
+	log  Logger
 }
 
 func (t *standardTimer) time(dur time.Duration) {
@@ -343,6 +345,7 @@ func (t *standardTimer) AddDuration(dur time.Duration) {
 
 func (t *standardTimer) AddValue(value float64) {
 	t.sink.FlushTimer(t.name, value)
+	t.log.Infof("Flushed standard timer: %s", t.name) // todo: either remove or convert to debug logging
 }
 
 func (t *standardTimer) AllocateSpan() Timespan {
@@ -484,11 +487,12 @@ func (s *statStore) Flush() {
 		return true
 	})
 
-	flushedTimers := 0
-	skippedTimers := 0
-	flushedStats := 0
+	flushedReservoirTimers := make([]string, 0)
+	skippedTimers := make([]string, 0)
 	s.timers.Range(func(key, v interface{}) bool {
+		name := key.(string)
 		if timer, ok := v.(*reservoirTimer); ok {
+
 			values, count := timer.Empty()
 			reservoirSize := timer.ringSize // assuming this is immutable
 
@@ -499,20 +503,28 @@ func (s *statStore) Flush() {
 				sampleRate = float64(reservoirSize) / float64(count)
 			}
 
+			var flushedSamples int64
 			for _, value := range values {
-				s.sink.FlushSampledTimer(key.(string), value, sampleRate)
+				s.sink.FlushSampledTimer(name, value, sampleRate)
+				flushedSamples++
 			}
 
-			flushedTimers++
-			flushedStats += len(values)
+			var nameWithSampleCount strings.Builder
+			nameWithSampleCount.WriteString(name)
+			nameWithSampleCount.WriteString("|")
+			nameWithSampleCount.WriteString(strconv.FormatInt(flushedSamples, 10))
+			flushedReservoirTimers = append(flushedReservoirTimers, nameWithSampleCount.String())
+
 		} else {
-			skippedTimers++
+			skippedTimers = append(skippedTimers, name)
 		}
 
 		return true
 	})
-	s.log.Infof("Flushed %d timers including %d samples", flushedTimers, flushedStats) // todo: either remove or convert to debug logging
-	s.log.Infof("Ignored %d timers", skippedTimers)                                    // todo: either remove or convert to debug logging
+	s.log.Infof("Flushed reservoir timers: %s. Skipped timers: %s",
+		flushedReservoirTimers,
+		skippedTimers,
+	) // todo: remove this and related variable after testing to reduce performance hit
 
 	flushableSink, ok := s.sink.(FlushableSink)
 	if ok {
@@ -626,7 +638,6 @@ func (s *statStore) newTimer(serializedName string, base time.Duration) timer {
 			ringMask: FixedTimerReservoirSize - 1,
 			values:   make([]float64, FixedTimerReservoirSize),
 		}
-		s.log.Infof("New reservoirTimer created") // todo: either remove or convert to debug logging
 	case standard: // this should allow backward compatible a backwards compatible fallback as standard is the zero value of s.timerType
 		fallthrough
 	default:
@@ -634,8 +645,8 @@ func (s *statStore) newTimer(serializedName string, base time.Duration) timer {
 			name: serializedName,
 			sink: s.sink,
 			base: base,
+			log:  s.log,
 		}
-		s.log.Infof("New standardTimer created") // todo: either remove or convert to debug logging
 	}
 
 	if v, loaded := s.timers.LoadOrStore(serializedName, t); loaded {
