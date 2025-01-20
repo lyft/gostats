@@ -2,9 +2,7 @@ package stats
 
 import (
 	"context"
-	"os"
 	"strconv"
-	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -219,7 +217,6 @@ func NewStore(sink Sink, _ bool) Store {
 	return &statStore{
 		sink:      sink,
 		timerType: standard,
-		log:       &loggingSink{writer: os.Stderr, now: time.Now}, // should always be initialized since this is not exported todo: not sure if we really need this
 	}
 }
 
@@ -332,7 +329,6 @@ type standardTimer struct {
 	base time.Duration
 	name string
 	sink Sink
-	log  Logger
 }
 
 func (t *standardTimer) time(dur time.Duration) {
@@ -345,7 +341,6 @@ func (t *standardTimer) AddDuration(dur time.Duration) {
 
 func (t *standardTimer) AddValue(value float64) {
 	t.sink.FlushTimer(t.name, value)
-	t.log.Infof("Flushed standard timer: %s", t.name) // todo: either remove or convert to debug logging
 }
 
 func (t *standardTimer) AllocateSpan() Timespan {
@@ -437,7 +432,6 @@ type statStore struct {
 	statGenerators []StatGenerator
 
 	sink Sink
-	log  Logger
 }
 
 var ReservedTagWords = map[string]bool{"asg": true, "az": true, "backend": true, "canary": true, "host": true, "period": true, "region": true, "shard": true, "window": true, "source": true, "project": true, "facet": true, "envoyservice": true}
@@ -487,12 +481,8 @@ func (s *statStore) Flush() {
 		return true
 	})
 
-	flushedReservoirTimers := make([]string, 0)
-	skippedTimers := make([]string, 0)
 	s.timers.Range(func(key, v interface{}) bool {
-		name := key.(string)
 		if timer, ok := v.(*reservoirTimer); ok {
-
 			values, count := timer.Empty()
 			reservoirSize := timer.ringSize // assuming this is immutable
 
@@ -503,28 +493,13 @@ func (s *statStore) Flush() {
 				sampleRate = float64(reservoirSize) / float64(count)
 			}
 
-			var flushedSamples int64
 			for _, value := range values {
-				s.sink.FlushSampledTimer(name, value, sampleRate)
-				flushedSamples++
+				s.sink.FlushSampledTimer(key.(string), value, sampleRate)
 			}
-
-			var nameWithSampleCount strings.Builder
-			nameWithSampleCount.WriteString(name)
-			nameWithSampleCount.WriteString("|")
-			nameWithSampleCount.WriteString(strconv.FormatInt(flushedSamples, 10))
-			flushedReservoirTimers = append(flushedReservoirTimers, nameWithSampleCount.String())
-
-		} else {
-			skippedTimers = append(skippedTimers, name)
 		}
 
 		return true
 	})
-	s.log.Infof("Flushed reservoir timers: %s. Skipped timers: %s",
-		flushedReservoirTimers,
-		skippedTimers,
-	) // todo: remove this and related variable after testing to reduce performance hit
 
 	flushableSink, ok := s.sink.(FlushableSink)
 	if ok {
@@ -645,7 +620,6 @@ func (s *statStore) newTimer(serializedName string, base time.Duration) timer {
 			name: serializedName,
 			sink: s.sink,
 			base: base,
-			log:  s.log,
 		}
 	}
 

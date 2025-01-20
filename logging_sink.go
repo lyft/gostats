@@ -107,7 +107,3 @@ func (s *loggingSink) Errorf(msg string, args ...interface{}) {
 func (s *loggingSink) Warnf(msg string, args ...interface{}) {
 	s.logMessage("warn", fmt.Sprintf(msg, args...))
 }
-
-func (s *loggingSink) Infof(msg string, args ...interface{}) {
-	s.logMessage("info", fmt.Sprintf(msg, args...))
-}
