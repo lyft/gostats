@@ -76,7 +76,7 @@ func (r runtimeStats) GenerateStats() {
 
 	r.nextGC.Set(memStats.NextGC)
 	r.lastGC.Set(memStats.LastGC)
-	r.pauseTotalNs.Set(uint64(memStats.PauseTotalNs))
+	r.pauseTotalNs.Set(memStats.PauseTotalNs)
 	r.numGC.Set(uint64(memStats.NumGC))
 	r.gcCPUPercent.Set(uint64(memStats.GCCPUFraction * 100))
 
