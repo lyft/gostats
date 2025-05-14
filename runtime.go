@@ -23,8 +23,8 @@ type runtimeStats struct {
 	// Garbage collector statistics.
 	nextGC       Gauge // next collection will happen when HeapAlloc ≥ this amount
 	lastGC       Gauge // end time of last collection (nanoseconds since 1970)
-	pauseTotalNs Counter
-	numGC        Counter
+	pauseTotalNs Gauge
+	numGC        Gauge
 	gcCPUPercent Gauge
 
 	numGoroutine Gauge
@@ -50,8 +50,8 @@ func NewRuntimeStats(scope Scope) StatGenerator {
 
 		nextGC:       scope.NewGauge("nextGC"),
 		lastGC:       scope.NewGauge("lastGC"),
-		pauseTotalNs: scope.NewCounter("pauseTotalNs"),
-		numGC:        scope.NewCounter("numGC"),
+		pauseTotalNs: scope.NewGauge("pauseTotalNs"),
+		numGC:        scope.NewGauge("numGC"),
 		gcCPUPercent: scope.NewGauge("gcCPUPercent"),
 
 		numGoroutine: scope.NewGauge("numGoroutine"),
@@ -76,7 +76,7 @@ func (r runtimeStats) GenerateStats() {
 
 	r.nextGC.Set(memStats.NextGC)
 	r.lastGC.Set(memStats.LastGC)
-	r.pauseTotalNs.Set(memStats.PauseTotalNs)
+	r.pauseTotalNs.Set(uint64(memStats.PauseTotalNs))
 	r.numGC.Set(uint64(memStats.NumGC))
 	r.gcCPUPercent.Set(uint64(memStats.GCCPUFraction * 100))
 
