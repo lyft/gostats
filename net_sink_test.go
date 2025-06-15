@@ -16,6 +16,8 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/stretchr/testify/assert"
 )
 
 func foreverNow() time.Time {
@@ -877,4 +879,36 @@ func BenchmarkFlushTimer(b *testing.B) {
 	for i := 0; i < b.N; i++ {
 		sink.FlushTimer("TestTImer.___f=i.__tag1=v1", float64(i)/3)
 	}
+}
+
+func TestCalculateNextSleep(t *testing.T) {
+	t.Parallel()
+
+	// 1. Test that the sleep duration is within the expected bounds.
+	// Run it a few times to get some randomness.
+	for i := 0; i < 100; i++ {
+		// Start with the base delay
+		d := calculateNextSleep(baseReconnectDelay)
+		assert.GreaterOrEqual(t, d, baseReconnectDelay)
+		assert.Less(t, d, baseReconnectDelay*3)
+
+		// Try with a larger previous delay
+		prev := 10 * time.Second
+		d = calculateNextSleep(prev)
+		assert.GreaterOrEqual(t, d, baseReconnectDelay)
+		assert.Less(t, d, prev*3)
+	}
+
+	// 2. Test the cap
+	d := calculateNextSleep(maxReconnectDelay)
+	assert.GreaterOrEqual(t, d, baseReconnectDelay)
+	assert.LessOrEqual(t, d, maxReconnectDelay)
+
+	// 3. Test edge case where prevSleep * 3 <= base.
+	// It should default back to the base.
+	d = calculateNextSleep(baseReconnectDelay / 3)
+	assert.Equal(t, baseReconnectDelay, d)
+
+	d = calculateNextSleep(0)
+	assert.Equal(t, baseReconnectDelay, d)
 }
