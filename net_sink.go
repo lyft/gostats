@@ -293,17 +293,7 @@ func (s *netSink) run() {
 				}
 				reconnectFailed = true
 
-				// Decorrelated Jitter: sleep = min(cap, random_between(base, prev_sleep * 3))
-				prevSleep := s.reconnectDelay
-				upperBound := prevSleep * 3
-
-				randomRange := upperBound - baseReconnectDelay
-				randomPart := time.Duration(rand.Int64N(int64(randomRange)))
-				nextSleep := baseReconnectDelay + randomPart
-
-				if nextSleep > maxReconnectDelay {
-					nextSleep = maxReconnectDelay
-				}
+				nextSleep := calculateNextSleep(s.reconnectDelay)
 
 				s.log.Warnf("connection error: %s, reconnecting in %s", err, nextSleep)
 				time.Sleep(nextSleep)
@@ -439,4 +429,23 @@ func (b *buffer) WriteUnit64(val uint64) {
 
 func (b *buffer) WriteFloat64(val float64) {
 	*b = strconv.AppendFloat(*b, val, 'f', 6, 64)
+}
+
+func calculateNextSleep(prevSleep time.Duration) time.Duration {
+	// Decorrelated Jitter: sleep = min(cap, random_between(base, prev_sleep * 3))
+	upperBound := prevSleep * 3
+
+	var nextSleep time.Duration
+	if upperBound > baseReconnectDelay {
+		randomRange := upperBound - baseReconnectDelay
+		jitter := time.Duration(rand.Int64N(int64(randomRange)))
+		nextSleep = baseReconnectDelay + jitter
+	} else {
+		nextSleep = baseReconnectDelay
+	}
+
+	if nextSleep > maxReconnectDelay {
+		nextSleep = maxReconnectDelay
+	}
+	return nextSleep
 }
