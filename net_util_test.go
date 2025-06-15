@@ -231,7 +231,7 @@ func (s *netTestSink) Restart(t testing.TB, resetBuffer bool) {
 func (s *netTestSink) WaitForStat(t testing.TB, timeout time.Duration) string {
 	t.Helper()
 	if timeout <= 0 {
-		timeout = defaultRetryInterval * 2
+		timeout = baseReconnectDelay * 5
 	}
 	to := time.NewTimer(timeout)
 	defer to.Stop()

@@ -667,12 +667,12 @@ func testNetSinkReconnect(t *testing.T, protocol string) {
 	// This test is flaky with UDP and the race detector, but good
 	// to have so we log instead of fail the test.
 	if protocol == "udp" {
-		stat := ts.WaitForStat(replaceFatalWithLog{t}, defaultRetryInterval*3)
+		stat := ts.WaitForStat(replaceFatalWithLog{t}, baseReconnectDelay*5)
 		if stat != "" && stat != expected {
 			t.Fatalf("stats got: %q want: %q", stat, expected)
 		}
 	} else {
-		stat := ts.WaitForStat(t, defaultRetryInterval*3)
+		stat := ts.WaitForStat(t, baseReconnectDelay*5)
 		if stat != expected {
 			t.Fatalf("stats got: %q want: %q", stat, expected)
 		}
@@ -721,7 +721,7 @@ func testNetSinkReconnectFailure(t *testing.T, protocol string) {
 	select {
 	case <-flushed:
 		// Ok
-	case <-time.After(defaultRetryInterval * 2):
+	case <-time.After(baseReconnectDelay * 5):
 		t.Fatalf("Only %d of %d Flush() calls succeeded",
 			atomic.LoadInt64(flushCount), N)
 	}
@@ -843,7 +843,7 @@ func testNetSinkIntegration(t *testing.T, protocol string) {
 			if err != nil {
 				t.Fatal(err)
 			}
-		case <-time.After(defaultRetryInterval * 2):
+		case <-time.After(baseReconnectDelay * 5):
 			t.Fatal("Timed out waiting for command to exit")
 		}
 	})
