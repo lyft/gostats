@@ -613,6 +613,61 @@ func testNetSinkStatTypes(t *testing.T, protocol string) {
 	}
 }
 
+func TestNetSink_BlockedStats(t *testing.T) {
+	ts := newNetTestSink(t, "tcp")
+	defer ts.Close()
+
+	blocked := map[string]struct{}{
+		"blocked_counter": {},
+		"blocked_gauge":   {},
+		"blocked_timer":   {},
+	}
+	sink := NewTCPStatsdSink(
+		WithLogger(discardLogger()),
+		WithStatsdHost(ts.Host(t)),
+		WithStatsdPort(ts.Port(t)),
+		WithBlockedStats(blocked),
+	)
+
+	sink.FlushCounter("blocked_counter", 1)
+	sink.FlushGauge("blocked_gauge", 1)
+	sink.FlushTimer("blocked_timer", 1)
+	sink.FlushCounter("allowed_counter", 1)
+	sink.Flush()
+
+	expected := "allowed_counter:1|c\n"
+	stat := ts.WaitForStat(t, time.Millisecond*50)
+	if stat != expected {
+		t.Errorf("stats got: %q want: %q", stat, expected)
+	}
+
+	// nothing else should have made it onto the wire
+	buf := ts.String()
+	if buf != expected {
+		t.Errorf("stats buffer\ngot:\n%q\nwant:\n%q\n", buf, expected)
+	}
+}
+
+func TestNetSink_BlockedStats_NilMap(t *testing.T) {
+	ts := newNetTestSink(t, "tcp")
+	defer ts.Close()
+
+	sink := NewTCPStatsdSink(
+		WithLogger(discardLogger()),
+		WithStatsdHost(ts.Host(t)),
+		WithStatsdPort(ts.Port(t)),
+	)
+
+	sink.FlushCounter("counter", 1)
+	sink.Flush()
+
+	const expected = "counter:1|c\n"
+	stat := ts.WaitForStat(t, time.Millisecond*50)
+	if stat != expected {
+		t.Errorf("stats got: %q want: %q", stat, expected)
+	}
+}
+
 func testNetSinkImmediateFlush(t *testing.T, protocol string) {
 	const expected = "counter:1|c\n"
 

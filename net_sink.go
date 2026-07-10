@@ -83,6 +83,25 @@ func WithLogger(log Logger) SinkOption {
 	})
 }
 
+// WithBlockedStats configures the sink to silently drop any Counter, Gauge,
+// or Timer whose name is a key in blocked, instead of writing it to the
+// wire. Lookups are O(1) against the exact name gostats resolves for a
+// stat: the dot-joined scope path plus any serialized tags (for example
+// "service.subscope.stat_name" or "stat_name.__tag=value"), as passed to
+// FlushCounter/FlushGauge/FlushTimer. It does NOT include any prefix (e.g.
+// an environment like "production:") or suffix (e.g. an aggregation type
+// like ":count" or ":p99") that a downstream metrics pipeline may add after
+// ingestion — callers building blocked from an externally sourced blocklist
+// are responsible for stripping those before constructing the map.
+//
+// The provided map is read concurrently and must not be mutated after being
+// passed in.
+func WithBlockedStats(blocked map[string]struct{}) SinkOption {
+	return sinkOptionFunc(func(sink *netSink) {
+		sink.blockedStats = blocked
+	})
+}
+
 // NewTCPStatsdSink returns a new NetStink. This function name exists for
 // backwards compatibility.
 func NewTCPStatsdSink(opts ...SinkOption) FlushableSink {
@@ -138,6 +157,14 @@ type netSink struct {
 	droppedBytes uint64
 	log          Logger
 	conf         Settings
+	blockedStats map[string]struct{}
+}
+
+// blocked reports whether name should be dropped instead of flushed. It is
+// safe to call with a nil map.
+func (s *netSink) blocked(name string) bool {
+	_, ok := s.blockedStats[name]
+	return ok
 }
 
 type sinkWriter struct {
@@ -252,14 +279,23 @@ func (s *netSink) flushFloat64(name, suffix string, f float64) {
 }
 
 func (s *netSink) FlushCounter(name string, value uint64) {
+	if s.blocked(name) {
+		return
+	}
 	s.flushUint64(name, "|c\n", value)
 }
 
 func (s *netSink) FlushGauge(name string, value uint64) {
+	if s.blocked(name) {
+		return
+	}
 	s.flushUint64(name, "|g\n", value)
 }
 
 func (s *netSink) FlushTimer(name string, value float64) {
+	if s.blocked(name) {
+		return
+	}
 	// Since we mistakenly use floating point values to represent time
 	// durations this method is often passed an integer encoded as a
 	// float. Formatting integers is much faster (>2x) than formatting
