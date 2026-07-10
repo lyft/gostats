@@ -8,6 +8,7 @@ import (
 	"net"
 	"os"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 )
@@ -84,15 +85,22 @@ func WithLogger(log Logger) SinkOption {
 }
 
 // WithBlockedStats configures the sink to silently drop any Counter, Gauge,
-// or Timer whose name is a key in blocked, instead of writing it to the
-// wire. Lookups are O(1) against the exact name gostats resolves for a
-// stat: the dot-joined scope path plus any serialized tags (for example
-// "service.subscope.stat_name" or "stat_name.__tag=value"), as passed to
-// FlushCounter/FlushGauge/FlushTimer. It does NOT include any prefix (e.g.
-// an environment like "production:") or suffix (e.g. an aggregation type
-// like ":count" or ":p99") that a downstream metrics pipeline may add after
-// ingestion — callers building blocked from an externally sourced blocklist
-// are responsible for stripping those before constructing the map.
+// or Timer whose path is a key in blocked, instead of writing it to the
+// wire. Before the O(1) map lookup, any serialized tags are stripped from
+// the stat's name: internal/tags always appends tags after the name (never
+// inside it), so truncating at the first tag separator recovers the
+// dot-joined scope path (for example "service.subscope.stat_name" from
+// "service.subscope.stat_name.__tag=value"). This means one blocklist entry
+// matches a stat regardless of the tag values attached to any given call
+// (host, per-instance id, etc.).
+//
+// blocked must NOT include any prefix (e.g. an environment like
+// "production:") or suffix (e.g. an aggregation type like ":count" or
+// ":p99") that a downstream metrics pipeline may add after ingestion —
+// callers building blocked from an externally sourced blocklist are
+// responsible for stripping those, and for translating the blocklist's
+// delimiter convention to gostats' '.'-joined scope path, before
+// constructing the map.
 //
 // The provided map is read concurrently and must not be mutated after being
 // passed in.
@@ -160,9 +168,24 @@ type netSink struct {
 	blockedStats map[string]struct{}
 }
 
+// tagSeparator is the separator internal/tags.TagSet.Serialize and
+// SerializeTags use to append serialized tags after a stat's name. Tags are
+// always appended after the name, never inserted into the middle of it, so
+// truncating at the first occurrence of this separator recovers the
+// tag-free path.
+const tagSeparator = ".__"
+
 // blocked reports whether name should be dropped instead of flushed. It is
-// safe to call with a nil map.
+// safe to call with a nil map. Matching is done against the tag-free path
+// (name with any serialized tags stripped), so a single blocklist entry
+// matches a stat regardless of the tag values attached to any given call.
 func (s *netSink) blocked(name string) bool {
+	if len(s.blockedStats) == 0 {
+		return false
+	}
+	if i := strings.Index(name, tagSeparator); i != -1 {
+		name = name[:i]
+	}
 	_, ok := s.blockedStats[name]
 	return ok
 }

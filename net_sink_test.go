@@ -648,6 +648,41 @@ func TestNetSink_BlockedStats(t *testing.T) {
 	}
 }
 
+func TestNetSink_BlockedStats_IgnoresTags(t *testing.T) {
+	ts := newNetTestSink(t, "tcp")
+	defer ts.Close()
+
+	// blocklist entries are tag-free paths; matching must ignore whatever
+	// tags happen to be attached to a given call.
+	blocked := map[string]struct{}{
+		"blocked_counter": {},
+	}
+	sink := NewTCPStatsdSink(
+		WithLogger(discardLogger()),
+		WithStatsdHost(ts.Host(t)),
+		WithStatsdPort(ts.Port(t)),
+		WithBlockedStats(blocked),
+	)
+
+	// simulate NewCounterWithTags-style serialized names: tags are always
+	// appended after the path via ".__key=value", sorted by key.
+	sink.FlushCounter("blocked_counter.__host=i-123", 1)
+	sink.FlushCounter("blocked_counter.__host=i-123.__region=us-east", 1)
+	sink.FlushCounter("allowed_counter.__host=i-123", 1)
+	sink.Flush()
+
+	expected := "allowed_counter.__host=i-123:1|c\n"
+	stat := ts.WaitForStat(t, time.Millisecond*50)
+	if stat != expected {
+		t.Errorf("stats got: %q want: %q", stat, expected)
+	}
+
+	buf := ts.String()
+	if buf != expected {
+		t.Errorf("stats buffer\ngot:\n%q\nwant:\n%q\n", buf, expected)
+	}
+}
+
 func TestNetSink_BlockedStats_NilMap(t *testing.T) {
 	ts := newNetTestSink(t, "tcp")
 	defer ts.Close()
@@ -931,5 +966,61 @@ func BenchmarkFlushTimer(b *testing.B) {
 	}
 	for i := 0; i < b.N; i++ {
 		sink.FlushTimer("TestTImer.___f=i.__tag1=v1", float64(i)/3)
+	}
+}
+
+// blockedStatsSet returns a set of n distinct, plausible-looking metric
+// paths, e.g. "path0.sub0.stat0", suitable for use as blockedStats.
+func blockedStatsSet(n int) map[string]struct{} {
+	set := make(map[string]struct{}, n)
+	for i := 0; i < n; i++ {
+		set[fmt.Sprintf("path%d.sub%d.stat%d", i, i, i)] = struct{}{}
+	}
+	return set
+}
+
+// BenchmarkFlushCounter_BlockedStats measures the overhead WithBlockedStats
+// adds to FlushCounter, both when the stat is allowed (the common case: a
+// map miss plus the normal flush work) and when it's blocked (a map hit and
+// an early return, skipping the flush entirely). It's parameterized by
+// blocklist size to check whether lookup cost is actually O(1) regardless
+// of size, or whether larger sets show cache-locality degradation from
+// Go's randomized map bucket layout.
+func BenchmarkFlushCounter_BlockedStats(b *testing.B) {
+	for _, n := range []int{0, 10, 100, 1_000, 10_000, 100_000} {
+		blocked := blockedStatsSet(n)
+
+		// Tagged name that never matches any blocklist entry: exercises the
+		// tag-stripping path plus a full map miss, then the real flush.
+		const allowedName = "allowed.path.stat.__host=i-123.__region=us-east"
+
+		b.Run(fmt.Sprintf("Allowed/n=%d", n), func(b *testing.B) {
+			sink := netSink{
+				bufWriter:    bufio.NewWriter(nopWriter{}),
+				blockedStats: blocked,
+			}
+			b.ReportAllocs()
+			b.ResetTimer()
+			for i := 0; i < b.N; i++ {
+				sink.FlushCounter(allowedName, uint64(i))
+			}
+		})
+
+		if n == 0 {
+			continue // nothing to block
+		}
+
+		blockedName := "path0.sub0.stat0.__host=i-123.__region=us-east"
+		b.Run(fmt.Sprintf("Blocked/n=%d", n), func(b *testing.B) {
+			sink := netSink{
+				bufWriter:    bufio.NewWriter(nopWriter{}),
+				blockedStats: blocked,
+			}
+			b.ReportAllocs()
+			b.ResetTimer()
+			for i := 0; i < b.N; i++ {
+				sink.FlushCounter(blockedName, uint64(i))
+			}
+		})
 	}
 }
