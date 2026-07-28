@@ -522,7 +522,7 @@ func BenchmarkStoreNewPerInstanceCounter(b *testing.B) {
 	})
 }
 
-func TestNewDefaultStoreWithSink_CallsWrapWithTheSinkNewDefaultStoreWouldHaveUsed(t *testing.T) {
+func TestWithSinkWrap_CallsWrapWithTheSinkNewDefaultStoreWouldHaveUsed(t *testing.T) {
 	cases := []struct {
 		name                string
 		useStatsd           string
@@ -552,10 +552,10 @@ func TestNewDefaultStoreWithSink_CallsWrapWithTheSinkNewDefaultStoreWouldHaveUse
 			t.Setenv("GOSTATS_LOGGING_SINK_DISABLED", tc.loggingSinkDisabled)
 
 			var wrapped FlushableSink
-			NewDefaultStoreWithSink(func(sink FlushableSink) FlushableSink {
+			NewDefaultStore(WithSinkWrap(func(sink FlushableSink) FlushableSink {
 				wrapped = sink
 				return sink
-			})
+			}))
 
 			if wrapped == nil {
 				t.Fatal("wrap was never called")
@@ -565,15 +565,15 @@ func TestNewDefaultStoreWithSink_CallsWrapWithTheSinkNewDefaultStoreWouldHaveUse
 	}
 }
 
-// TestNewDefaultStoreWithSink_InstallsWrappedSink proves the Store actually
-// flushes to whatever wrap returns, not to the sink NewDefaultStore would
-// otherwise have used unwrapped -- the whole point of the hook.
-func TestNewDefaultStoreWithSink_InstallsWrappedSink(t *testing.T) {
+// TestWithSinkWrap_InstallsWrappedSink proves the Store actually flushes to
+// whatever wrap returns, not to the sink NewDefaultStore would otherwise
+// have used unwrapped -- the whole point of the option.
+func TestWithSinkWrap_InstallsWrappedSink(t *testing.T) {
 	t.Setenv("USE_STATSD", "false")
 	t.Setenv("GOSTATS_LOGGING_SINK_DISABLED", "true")
 
 	replacement := mock.NewSink()
-	store := NewDefaultStoreWithSink(func(FlushableSink) FlushableSink { return replacement })
+	store := NewDefaultStore(WithSinkWrap(func(FlushableSink) FlushableSink { return replacement }))
 
 	store.NewCounter("test_counter").Inc()
 	store.Flush()
@@ -581,4 +581,16 @@ func TestNewDefaultStoreWithSink_InstallsWrappedSink(t *testing.T) {
 	if v, ok := replacement.LoadCounter("test_counter"); !ok || v != 1 {
 		t.Errorf("test_counter: got %v, %v want 1, true", v, ok)
 	}
+}
+
+// TestNewDefaultStore_NoOptions proves the zero-args call form still works
+// after NewDefaultStore became variadic.
+func TestNewDefaultStore_NoOptions(t *testing.T) {
+	t.Setenv("USE_STATSD", "false")
+	t.Setenv("GOSTATS_LOGGING_SINK_DISABLED", "true")
+
+	store := NewDefaultStore()
+
+	store.NewCounter("test_counter").Inc()
+	store.Flush() // must not panic
 }

@@ -217,21 +217,45 @@ func NewStore(sink Sink, _ bool) Store {
 	return &statStore{sink: sink}
 }
 
-// NewDefaultStore returns a Store with a TCP statsd sink, and a running flush timer.
-func NewDefaultStore() Store {
-	return NewDefaultStoreWithSink(func(sink FlushableSink) FlushableSink { return sink })
+// A StoreOption configures a Store returned by NewDefaultStore.
+type StoreOption interface {
+	apply(*storeOptions)
 }
 
-// NewDefaultStoreWithSink is like NewDefaultStore, but passes the sink it
+type storeOptions struct {
+	wrapSink func(FlushableSink) FlushableSink
+}
+
+// storeOptionFunc wraps a func so it satisfies the StoreOption interface.
+type storeOptionFunc func(*storeOptions)
+
+func (f storeOptionFunc) apply(o *storeOptions) {
+	f(o)
+}
+
+// WithSinkWrap returns a StoreOption that passes the sink NewDefaultStore
 // would otherwise have used unwrapped (chosen from Settings exactly as
-// NewDefaultStore does: a TCP statsd sink, or a logging/null sink depending
-// on UseStatsd and LoggingSinkDisabled) through wrap first.
+// NewDefaultStore always does: a TCP statsd sink, or a logging/null sink
+// depending on UseStatsd and LoggingSinkDisabled) through wrap before
+// constructing the Store.
 //
 // This lets a caller decorate that sink -- for example to filter which
 // stats actually get flushed -- without having to reimplement
 // NewDefaultStore's sink-selection logic themselves just to get at the
-// underlying sink, which NewDefaultStore itself doesn't expose.
-func NewDefaultStoreWithSink(wrap func(FlushableSink) FlushableSink) Store {
+// underlying sink, which NewDefaultStore doesn't otherwise expose.
+func WithSinkWrap(wrap func(FlushableSink) FlushableSink) StoreOption {
+	return storeOptionFunc(func(o *storeOptions) {
+		o.wrapSink = wrap
+	})
+}
+
+// NewDefaultStore returns a Store with a TCP statsd sink, and a running flush timer.
+func NewDefaultStore(opts ...StoreOption) Store {
+	so := storeOptions{wrapSink: func(sink FlushableSink) FlushableSink { return sink }}
+	for _, opt := range opts {
+		opt.apply(&so)
+	}
+
 	var newStore Store
 	settings := GetSettings()
 	if !settings.UseStatsd {
@@ -241,10 +265,10 @@ func NewDefaultStoreWithSink(wrap func(FlushableSink) FlushableSink) Store {
 		} else {
 			inner = NewLoggingSink()
 		}
-		newStore = NewStore(wrap(inner), false)
+		newStore = NewStore(so.wrapSink(inner), false)
 		go newStore.Start(time.NewTicker(10 * time.Second))
 	} else {
-		newStore = NewStore(wrap(NewTCPStatsdSink()), false)
+		newStore = NewStore(so.wrapSink(NewTCPStatsdSink()), false)
 		go newStore.Start(time.NewTicker(time.Duration(settings.FlushIntervalS) * time.Second))
 	}
 	return newStore
