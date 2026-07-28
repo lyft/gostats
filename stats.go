@@ -218,19 +218,10 @@ func NewStore(sink Sink, _ bool) Store {
 }
 
 // A StoreOption configures a Store returned by NewDefaultStore.
-type StoreOption interface {
-	apply(*storeOptions)
-}
+type StoreOption func(*storeOptions)
 
 type storeOptions struct {
 	wrapSink func(FlushableSink) FlushableSink
-}
-
-// storeOptionFunc wraps a func so it satisfies the StoreOption interface.
-type storeOptionFunc func(*storeOptions)
-
-func (f storeOptionFunc) apply(o *storeOptions) {
-	f(o)
 }
 
 // WithSinkWrap returns a StoreOption that passes the sink NewDefaultStore
@@ -244,16 +235,16 @@ func (f storeOptionFunc) apply(o *storeOptions) {
 // NewDefaultStore's sink-selection logic themselves just to get at the
 // underlying sink, which NewDefaultStore doesn't otherwise expose.
 func WithSinkWrap(wrap func(FlushableSink) FlushableSink) StoreOption {
-	return storeOptionFunc(func(o *storeOptions) {
+	return func(o *storeOptions) {
 		o.wrapSink = wrap
-	})
+	}
 }
 
 // NewDefaultStore returns a Store with a TCP statsd sink, and a running flush timer.
 func NewDefaultStore(opts ...StoreOption) Store {
 	so := storeOptions{wrapSink: func(sink FlushableSink) FlushableSink { return sink }}
 	for _, opt := range opts {
-		opt.apply(&so)
+		opt(&so)
 	}
 
 	var newStore Store
