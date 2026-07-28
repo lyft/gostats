@@ -219,17 +219,32 @@ func NewStore(sink Sink, _ bool) Store {
 
 // NewDefaultStore returns a Store with a TCP statsd sink, and a running flush timer.
 func NewDefaultStore() Store {
+	return NewDefaultStoreWithSink(func(sink FlushableSink) FlushableSink { return sink })
+}
+
+// NewDefaultStoreWithSink is like NewDefaultStore, but passes the sink it
+// would otherwise have used unwrapped (chosen from Settings exactly as
+// NewDefaultStore does: a TCP statsd sink, or a logging/null sink depending
+// on UseStatsd and LoggingSinkDisabled) through wrap first.
+//
+// This lets a caller decorate that sink -- for example to filter which
+// stats actually get flushed -- without having to reimplement
+// NewDefaultStore's sink-selection logic themselves just to get at the
+// underlying sink, which NewDefaultStore itself doesn't expose.
+func NewDefaultStoreWithSink(wrap func(FlushableSink) FlushableSink) Store {
 	var newStore Store
 	settings := GetSettings()
 	if !settings.UseStatsd {
+		var inner FlushableSink
 		if settings.LoggingSinkDisabled {
-			newStore = NewStore(NewNullSink(), false)
+			inner = NewNullSink()
 		} else {
-			newStore = NewStore(NewLoggingSink(), false)
+			inner = NewLoggingSink()
 		}
+		newStore = NewStore(wrap(inner), false)
 		go newStore.Start(time.NewTicker(10 * time.Second))
 	} else {
-		newStore = NewStore(NewTCPStatsdSink(), false)
+		newStore = NewStore(wrap(NewTCPStatsdSink()), false)
 		go newStore.Start(time.NewTicker(time.Duration(settings.FlushIntervalS) * time.Second))
 	}
 	return newStore

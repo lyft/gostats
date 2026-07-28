@@ -521,3 +521,64 @@ func BenchmarkStoreNewPerInstanceCounter(b *testing.B) {
 		}
 	})
 }
+
+func TestNewDefaultStoreWithSink_CallsWrapWithTheSinkNewDefaultStoreWouldHaveUsed(t *testing.T) {
+	cases := []struct {
+		name                string
+		useStatsd           string
+		loggingSinkDisabled string
+		assertType          func(t *testing.T, got FlushableSink)
+	}{
+		{"statsd", "true", "false", func(t *testing.T, got FlushableSink) {
+			if _, ok := got.(*netSink); !ok {
+				t.Errorf("wrap called with %T, want *netSink", got)
+			}
+		}},
+		{"logging", "false", "false", func(t *testing.T, got FlushableSink) {
+			if _, ok := got.(*loggingSink); !ok {
+				t.Errorf("wrap called with %T, want *loggingSink", got)
+			}
+		}},
+		{"null", "false", "true", func(t *testing.T, got FlushableSink) {
+			if _, ok := got.(nullSink); !ok {
+				t.Errorf("wrap called with %T, want nullSink", got)
+			}
+		}},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Setenv("USE_STATSD", tc.useStatsd)
+			t.Setenv("GOSTATS_LOGGING_SINK_DISABLED", tc.loggingSinkDisabled)
+
+			var wrapped FlushableSink
+			NewDefaultStoreWithSink(func(sink FlushableSink) FlushableSink {
+				wrapped = sink
+				return sink
+			})
+
+			if wrapped == nil {
+				t.Fatal("wrap was never called")
+			}
+			tc.assertType(t, wrapped)
+		})
+	}
+}
+
+// TestNewDefaultStoreWithSink_InstallsWrappedSink proves the Store actually
+// flushes to whatever wrap returns, not to the sink NewDefaultStore would
+// otherwise have used unwrapped -- the whole point of the hook.
+func TestNewDefaultStoreWithSink_InstallsWrappedSink(t *testing.T) {
+	t.Setenv("USE_STATSD", "false")
+	t.Setenv("GOSTATS_LOGGING_SINK_DISABLED", "true")
+
+	replacement := mock.NewSink()
+	store := NewDefaultStoreWithSink(func(FlushableSink) FlushableSink { return replacement })
+
+	store.NewCounter("test_counter").Inc()
+	store.Flush()
+
+	if v, ok := replacement.LoadCounter("test_counter"); !ok || v != 1 {
+		t.Errorf("test_counter: got %v, %v want 1, true", v, ok)
+	}
+}
