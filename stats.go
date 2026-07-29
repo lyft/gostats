@@ -340,10 +340,58 @@ type statStore struct {
 	gauges   sync.Map
 	timers   sync.Map
 
+	cache scopeCache
+
 	mu             sync.RWMutex
 	statGenerators []StatGenerator
 
 	sink Sink
+}
+
+// cacheEntry stores the exact name and tags used to derive val, so a
+// scopeCache hit can be confirmed before being trusted (guards against the
+// astronomically rare case of two different name+tags pairs hashing to the
+// same value).
+type cacheEntry struct {
+	name string
+	tags map[string]string
+	val  any
+}
+
+// scopeCache memoizes tag-based Scope/Counter/Gauge/Timer lookups so that
+// repeated calls with identical name+tags skip re-deriving the
+// joinScopes/MergeTags/Serialize (or, at the root, SerializeTags) path once a
+// handle has already been created for that combination.
+//
+// Entries are never evicted: gostats already retains one Counter/Gauge/Timer
+// per unique serialized name+tags forever (see statStore.counters/gauges/
+// timers), so this cache's growth is bounded by the same real metric
+// cardinality a caller already commits to by using tags at all, not by
+// anything new.
+//
+// The zero value is ready to use.
+type scopeCache struct {
+	scopes      sync.Map
+	counters    sync.Map
+	gauges      sync.Map
+	timers      sync.Map
+	milliTimers sync.Map
+}
+
+// cachedOrCreate returns the memoized value for name+tags in m, confirming
+// the stored name and tags match before trusting a hit (see cacheEntry), or
+// calls create and memoizes the result on a miss (or collision).
+func cachedOrCreate[T any](m *sync.Map, name string, tags map[string]string, create func() T) T {
+	h := tagspkg.HashNameTags(name, tags)
+	if v, ok := m.Load(h); ok {
+		e := v.(*cacheEntry)
+		if e.name == name && tagspkg.TagsEqual(e.tags, tags) {
+			return e.val.(T)
+		}
+	}
+	val := create()
+	m.Store(h, &cacheEntry{name: name, tags: tags, val: val})
+	return val
 }
 
 var ReservedTagWords = map[string]bool{"asg": true, "az": true, "backend": true, "canary": true, "host": true, "period": true, "region": true, "shard": true, "window": true, "source": true, "project": true, "facet": true, "envoyservice": true}
@@ -410,12 +458,14 @@ func (s *statStore) Store() Store {
 }
 
 func (s *statStore) Scope(name string) Scope {
-	return newSubScope(s, name, nil)
+	return s.ScopeWithTags(name, nil)
 }
 
 func (s *statStore) ScopeWithTags(name string, tags map[string]string) Scope {
 	s.validateTags(tags)
-	return newSubScope(s, name, tags)
+	return cachedOrCreate(&s.cache.scopes, name, tags, func() Scope {
+		return newSubScope(s, name, tags)
+	})
 }
 
 func (s *statStore) newCounter(serializedName string) *counter {
@@ -435,7 +485,9 @@ func (s *statStore) NewCounter(name string) Counter {
 
 func (s *statStore) NewCounterWithTags(name string, tags map[string]string) Counter {
 	s.validateTags(tags)
-	return s.newCounter(tagspkg.SerializeTags(name, tags))
+	return cachedOrCreate(&s.cache.counters, name, tags, func() Counter {
+		return s.newCounter(tagspkg.SerializeTags(name, tags))
+	})
 }
 
 func (s *statStore) newCounterWithTagSet(name string, tags tagspkg.TagSet) Counter {
@@ -472,7 +524,9 @@ func (s *statStore) NewGauge(name string) Gauge {
 
 func (s *statStore) NewGaugeWithTags(name string, tags map[string]string) Gauge {
 	s.validateTags(tags)
-	return s.newGauge(tagspkg.SerializeTags(name, tags))
+	return cachedOrCreate(&s.cache.gauges, name, tags, func() Gauge {
+		return s.newGauge(tagspkg.SerializeTags(name, tags))
+	})
 }
 
 func (s *statStore) newGaugeWithTagSet(name string, tags tagspkg.TagSet) Gauge {
@@ -507,7 +561,9 @@ func (s *statStore) NewMilliTimer(name string) Timer {
 
 func (s *statStore) NewMilliTimerWithTags(name string, tags map[string]string) Timer {
 	s.validateTags(tags)
-	return s.newTimer(tagspkg.SerializeTags(name, tags), time.Millisecond)
+	return cachedOrCreate(&s.cache.milliTimers, name, tags, func() Timer {
+		return s.newTimer(tagspkg.SerializeTags(name, tags), time.Millisecond)
+	})
 }
 
 func (s *statStore) NewTimer(name string) Timer {
@@ -516,7 +572,9 @@ func (s *statStore) NewTimer(name string) Timer {
 
 func (s *statStore) NewTimerWithTags(name string, tags map[string]string) Timer {
 	s.validateTags(tags)
-	return s.newTimer(tagspkg.SerializeTags(name, tags), time.Microsecond)
+	return cachedOrCreate(&s.cache.timers, name, tags, func() Timer {
+		return s.newTimer(tagspkg.SerializeTags(name, tags), time.Microsecond)
+	})
 }
 
 func (s *statStore) newTimerWithTagSet(name string, tags tagspkg.TagSet, base time.Duration) Timer {
@@ -549,6 +607,7 @@ type subScope struct {
 	registry *statStore
 	name     string
 	tags     tagspkg.TagSet // read-only and may be shared by multiple subScopes
+	cache    scopeCache
 }
 
 func newSubScope(registry *statStore, name string, tags map[string]string) *subScope {
@@ -561,11 +620,13 @@ func (s *subScope) Scope(name string) Scope {
 
 func (s *subScope) ScopeWithTags(name string, tags map[string]string) Scope {
 	s.registry.validateTags(tags)
-	return &subScope{
-		registry: s.registry,
-		name:     joinScopes(s.name, name),
-		tags:     s.tags.MergeTags(tags),
-	}
+	return cachedOrCreate(&s.cache.scopes, name, tags, func() Scope {
+		return &subScope{
+			registry: s.registry,
+			name:     joinScopes(s.name, name),
+			tags:     s.tags.MergeTags(tags),
+		}
+	})
 }
 
 func (s *subScope) Store() Store {
@@ -577,7 +638,9 @@ func (s *subScope) NewCounter(name string) Counter {
 }
 
 func (s *subScope) NewCounterWithTags(name string, tags map[string]string) Counter {
-	return s.registry.newCounterWithTagSet(joinScopes(s.name, name), s.tags.MergeTags(tags))
+	return cachedOrCreate(&s.cache.counters, name, tags, func() Counter {
+		return s.registry.newCounterWithTagSet(joinScopes(s.name, name), s.tags.MergeTags(tags))
+	})
 }
 
 func (s *subScope) NewPerInstanceCounter(name string, tags map[string]string) Counter {
@@ -590,7 +653,9 @@ func (s *subScope) NewGauge(name string) Gauge {
 }
 
 func (s *subScope) NewGaugeWithTags(name string, tags map[string]string) Gauge {
-	return s.registry.newGaugeWithTagSet(joinScopes(s.name, name), s.tags.MergeTags(tags))
+	return cachedOrCreate(&s.cache.gauges, name, tags, func() Gauge {
+		return s.registry.newGaugeWithTagSet(joinScopes(s.name, name), s.tags.MergeTags(tags))
+	})
 }
 
 func (s *subScope) NewPerInstanceGauge(name string, tags map[string]string) Gauge {
@@ -603,7 +668,9 @@ func (s *subScope) NewTimer(name string) Timer {
 }
 
 func (s *subScope) NewTimerWithTags(name string, tags map[string]string) Timer {
-	return s.registry.newTimerWithTagSet(joinScopes(s.name, name), s.tags.MergeTags(tags), time.Microsecond)
+	return cachedOrCreate(&s.cache.timers, name, tags, func() Timer {
+		return s.registry.newTimerWithTagSet(joinScopes(s.name, name), s.tags.MergeTags(tags), time.Microsecond)
+	})
 }
 
 func (s *subScope) NewPerInstanceTimer(name string, tags map[string]string) Timer {
@@ -616,7 +683,9 @@ func (s *subScope) NewMilliTimer(name string) Timer {
 }
 
 func (s *subScope) NewMilliTimerWithTags(name string, tags map[string]string) Timer {
-	return s.registry.newTimerWithTagSet(joinScopes(s.name, name), s.tags.MergeTags(tags), time.Millisecond)
+	return cachedOrCreate(&s.cache.milliTimers, name, tags, func() Timer {
+		return s.registry.newTimerWithTagSet(joinScopes(s.name, name), s.tags.MergeTags(tags), time.Millisecond)
+	})
 }
 
 func (s *subScope) NewPerInstanceMilliTimer(name string, tags map[string]string) Timer {

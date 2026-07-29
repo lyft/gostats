@@ -450,6 +450,66 @@ func SerializeTags(name string, tags map[string]string) string {
 	}
 }
 
+const (
+	fnvOffset64 = 14695981039346656037
+	fnvPrime64  = 1099511628211
+)
+
+// hashString folds s into the running FNV-1a hash h.
+func hashString(h uint64, s string) uint64 {
+	for i := 0; i < len(s); i++ {
+		h ^= uint64(s[i])
+		h *= fnvPrime64
+	}
+	return h
+}
+
+// HashNameTags returns an order-independent hash of name and tags, suitable
+// as a memoization cache key: equal (name, tags) pairs hash to the same
+// value regardless of the tags map's iteration order. Unlike Serialize, it
+// never allocates and doesn't require the tags to be sorted.
+//
+// Two different (name, tags) pairs can, rarely, hash to the same value, so
+// callers must still confirm equality against the original name and tags
+// (see TagsEqual) before trusting a cache hit keyed on this hash.
+func HashNameTags(name string, tags map[string]string) uint64 {
+	h := hashString(fnvOffset64, name)
+	var combined uint64
+	for k, v := range tags {
+		if k == "" || v == "" {
+			continue
+		}
+		ph := hashString(fnvOffset64, k)
+		ph = hashString(ph, "=")
+		ph = hashString(ph, v)
+		combined ^= ph // order-independent: XOR doesn't care what order pairs arrive in
+	}
+	return h ^ combined
+}
+
+// TagsEqual returns whether a and b contain the same set of non-empty
+// key/value pairs, ignoring order and any empty-key/empty-value entries
+// (which NewTagSet and friends also ignore). Used to confirm a
+// HashNameTags-keyed cache hit isn't a hash collision.
+func TagsEqual(a, b map[string]string) bool {
+	na, nb := 0, 0
+	for k, v := range a {
+		if k == "" || v == "" {
+			continue
+		}
+		na++
+		if b[k] != v {
+			return false
+		}
+	}
+	for k, v := range b {
+		if k != "" && v != "" {
+			nb++
+		}
+	}
+	return na == nb
+}
+
 // ReplaceChars replaces any invalid chars ([.:|]) in value s with '_'.
 func ReplaceChars(s string) string {
 	var buf []byte // lazily allocated
