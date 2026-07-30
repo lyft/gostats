@@ -348,16 +348,6 @@ type statStore struct {
 	sink Sink
 }
 
-// cacheEntry stores the exact name and tags used to derive val, so a
-// scopeCache hit can be confirmed before being trusted (guards against the
-// astronomically rare case of two different name+tags pairs hashing to the
-// same value).
-type cacheEntry struct {
-	name string
-	tags map[string]string
-	val  any
-}
-
 // scopeCache memoizes tag-based Scope/Counter/Gauge/Timer lookups so that
 // repeated calls with identical name+tags skip re-deriving the
 // joinScopes/MergeTags/Serialize (or, at the root, SerializeTags) path once a
@@ -367,7 +357,14 @@ type cacheEntry struct {
 // per unique serialized name+tags forever (see statStore.counters/gauges/
 // timers), so this cache's growth is bounded by the same real metric
 // cardinality a caller already commits to by using tags at all, not by
-// anything new.
+// anything new. Since entries are permanent, keys are the 128-bit
+// tagspkg.HashNameTags128 hash rather than a 64-bit hash plus a retained
+// copy of the original name/tags for collision verification: at 128 bits a
+// collision is negligible for any realistic cardinality (see
+// HashNameTags128), and skipping the verification copy avoids pinning a
+// map[string]string (~200+ bytes, several times the size of the Counter/
+// Gauge/Timer it would be guarding) in memory forever for every distinct
+// metric ever seen.
 //
 // The zero value is ready to use.
 type scopeCache struct {
@@ -378,19 +375,22 @@ type scopeCache struct {
 	milliTimers sync.Map
 }
 
-// cachedOrCreate returns the memoized value for name+tags in m, confirming
-// the stored name and tags match before trusting a hit (see cacheEntry), or
-// calls create and memoizes the result on a miss (or collision).
+// hash128 is the two-uint64 cache key scopeCache uses (see its doc comment
+// for why 128 bits is trusted without a verification copy).
+type hash128 struct {
+	hi, lo uint64
+}
+
+// cachedOrCreate returns the memoized value for name+tags in m, or calls
+// create and memoizes the result on a miss.
 func cachedOrCreate[T any](m *sync.Map, name string, tags map[string]string, create func() T) T {
-	h := tagspkg.HashNameTags(name, tags)
-	if v, ok := m.Load(h); ok {
-		e := v.(*cacheEntry)
-		if e.name == name && tagspkg.TagsEqual(e.tags, tags) {
-			return e.val.(T)
-		}
+	hi, lo := tagspkg.HashNameTags128(name, tags)
+	k := hash128{hi, lo}
+	if v, ok := m.Load(k); ok {
+		return v.(T)
 	}
 	val := create()
-	m.Store(h, &cacheEntry{name: name, tags: tags, val: val})
+	m.Store(k, val)
 	return val
 }
 

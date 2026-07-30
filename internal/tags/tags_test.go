@@ -1032,59 +1032,46 @@ func TestParseTags(t *testing.T) {
 }
 
 ///////////////////////////////////////////////////////////////////
-// HashNameTags / TagsEqual Tests
+// HashNameTags128 Tests
 
-func TestHashNameTagsOrderIndependent(t *testing.T) {
+func TestHashNameTags128OrderIndependent(t *testing.T) {
 	tags1 := map[string]string{"region_code": "us-east-1", "ride_type": "standard"}
 	tags2 := map[string]string{"ride_type": "standard", "region_code": "us-east-1"} // same content, different map
-	if HashNameTags("name", tags1) != HashNameTags("name", tags2) {
+	hi1, lo1 := HashNameTags128("name", tags1)
+	hi2, lo2 := HashNameTags128("name", tags2)
+	if hi1 != hi2 || lo1 != lo2 {
 		t.Error("hash should not depend on map iteration order")
 	}
 }
 
-func TestHashNameTagsDiffer(t *testing.T) {
-	base := HashNameTags("name", map[string]string{"region_code": "us-east-1"})
-	cases := map[string]uint64{
-		"different name":  HashNameTags("other", map[string]string{"region_code": "us-east-1"}),
-		"different value": HashNameTags("name", map[string]string{"region_code": "us-west-2"}),
-		"different key":   HashNameTags("name", map[string]string{"other_key": "us-east-1"}),
-		"extra tag":       HashNameTags("name", map[string]string{"region_code": "us-east-1", "extra": "x"}),
-		"no tags":         HashNameTags("name", nil),
-	}
+func TestHashNameTags128Differ(t *testing.T) {
+	baseHi, baseLo := HashNameTags128("name", map[string]string{"region_code": "us-east-1"})
+	cases := map[string][2]uint64{}
+	set := func(label string, hi, lo uint64) { cases[label] = [2]uint64{hi, lo} }
+
+	hi, lo := HashNameTags128("other", map[string]string{"region_code": "us-east-1"})
+	set("different name", hi, lo)
+	hi, lo = HashNameTags128("name", map[string]string{"region_code": "us-west-2"})
+	set("different value", hi, lo)
+	hi, lo = HashNameTags128("name", map[string]string{"other_key": "us-east-1"})
+	set("different key", hi, lo)
+	hi, lo = HashNameTags128("name", map[string]string{"region_code": "us-east-1", "extra": "x"})
+	set("extra tag", hi, lo)
+	hi, lo = HashNameTags128("name", nil)
+	set("no tags", hi, lo)
+
 	for label, h := range cases {
-		if h == base {
+		if h[0] == baseHi && h[1] == baseLo {
 			t.Errorf("%s: expected a different hash, got the same value", label)
 		}
 	}
 }
 
-func TestHashNameTagsIgnoresEmptyKeyValue(t *testing.T) {
-	a := HashNameTags("name", map[string]string{"k": "v"})
-	b := HashNameTags("name", map[string]string{"k": "v", "": "invalid_key", "invalid_value": ""})
-	if a != b {
+func TestHashNameTags128IgnoresEmptyKeyValue(t *testing.T) {
+	hiA, loA := HashNameTags128("name", map[string]string{"k": "v"})
+	hiB, loB := HashNameTags128("name", map[string]string{"k": "v", "": "invalid_key", "invalid_value": ""})
+	if hiA != hiB || loA != loB {
 		t.Error("empty-key/empty-value tags should not affect the hash")
-	}
-}
-
-func TestTagsEqual(t *testing.T) {
-	tests := []struct {
-		name  string
-		a, b  map[string]string
-		equal bool
-	}{
-		{"both nil", nil, nil, true},
-		{"same content", map[string]string{"a": "1", "b": "2"}, map[string]string{"b": "2", "a": "1"}, true},
-		{"different value", map[string]string{"a": "1"}, map[string]string{"a": "2"}, false},
-		{"different key", map[string]string{"a": "1"}, map[string]string{"b": "1"}, false},
-		{"different size", map[string]string{"a": "1"}, map[string]string{"a": "1", "b": "2"}, false},
-		{"ignores empty entries", map[string]string{"a": "1"}, map[string]string{"a": "1", "": "x", "y": ""}, true},
-	}
-	for _, x := range tests {
-		t.Run(x.name, func(t *testing.T) {
-			if got := TagsEqual(x.a, x.b); got != x.equal {
-				t.Errorf("TagsEqual(%v, %v) = %t, want %t", x.a, x.b, got, x.equal)
-			}
-		})
 	}
 }
 
