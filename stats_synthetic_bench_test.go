@@ -2,7 +2,7 @@ package stats
 
 import "testing"
 
-// syntheticTrace simulates the call pattern of a service (e.g. supplycost)
+// syntheticTrace simulates the call pattern of a request-serving service
 // that holds a long-lived root Scope but re-derives nested scopes and
 // tagged metric handles afresh, inline, on every request - rather than
 // caching subScope/Counter/Gauge/Timer references itself. This is the exact
@@ -41,7 +41,7 @@ func syntheticTrace(root Scope) {
 // lookups" commit).
 func BenchmarkSyntheticTrace(b *testing.B) {
 	store := NewStore(NewNullSink(), false)
-	root := store.Scope("supplycost")
+	root := store.Scope("app")
 
 	b.ReportAllocs()
 	b.ResetTimer()
@@ -55,7 +55,7 @@ func BenchmarkSyntheticTrace(b *testing.B) {
 // shape for a request-serving service.
 func BenchmarkSyntheticTraceParallel(b *testing.B) {
 	store := NewStore(NewNullSink(), false)
-	root := store.Scope("supplycost")
+	root := store.Scope("app")
 
 	b.ReportAllocs()
 	b.ResetTimer()
@@ -120,7 +120,7 @@ func syntheticTracePooled(root Scope, p *pooledTags) {
 // that BenchmarkSyntheticTrace also pays for removed from the measurement.
 func BenchmarkSyntheticTracePooled(b *testing.B) {
 	store := NewStore(NewNullSink(), false)
-	root := store.Scope("supplycost")
+	root := store.Scope("app")
 	tags := newPooledTags()
 
 	b.ReportAllocs()
@@ -135,7 +135,7 @@ func BenchmarkSyntheticTracePooled(b *testing.B) {
 // across goroutines.
 func BenchmarkSyntheticTracePooledParallel(b *testing.B) {
 	store := NewStore(NewNullSink(), false)
-	root := store.Scope("supplycost")
+	root := store.Scope("app")
 	tags := newPooledTags()
 
 	b.ReportAllocs()
@@ -155,7 +155,7 @@ func BenchmarkSyntheticTracePooledParallel(b *testing.B) {
 // regression.
 func BenchmarkSyntheticTracePerInstance(b *testing.B) {
 	store := NewStore(NewNullSink(), false)
-	node := store.Scope("supplycost").ScopeWithTags("graph", map[string]string{"graph_name": "supply_estimate"}).
+	node := store.Scope("app").ScopeWithTags("graph", map[string]string{"graph_name": "supply_estimate"}).
 		ScopeWithTags("node", map[string]string{"source_node": "waypoint_bonus"})
 
 	b.ReportAllocs()
@@ -171,7 +171,7 @@ func BenchmarkSyntheticTracePerInstance(b *testing.B) {
 // from the caller-side map-literal cost.
 func BenchmarkSyntheticTracePerInstancePooled(b *testing.B) {
 	store := NewStore(NewNullSink(), false)
-	node := store.Scope("supplycost").ScopeWithTags("graph", map[string]string{"graph_name": "supply_estimate"}).
+	node := store.Scope("app").ScopeWithTags("graph", map[string]string{"graph_name": "supply_estimate"}).
 		ScopeWithTags("node", map[string]string{"source_node": "waypoint_bonus"})
 	tags := newPooledTags()
 
