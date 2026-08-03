@@ -24,14 +24,33 @@ type TagSet []Tag
 
 // NewTagSet returns a new TagSet from the tags map.
 func NewTagSet(tags map[string]string) TagSet {
-	a := make(TagSet, 0, len(tags))
+	return gatherValidTags(make(TagSet, 0, len(tags)), tags)
+}
+
+// gatherValidTags appends any pair from tags with a non-empty key and
+// value onto dst and returns the sorted result. The caller owns dst's
+// backing array (which may be a stack array pre-sized via numValidTags),
+// so this function never allocates on its own.
+func gatherValidTags(dst TagSet, tags map[string]string) TagSet {
 	for k, v := range tags {
 		if k != "" && v != "" {
-			a = append(a, NewTag(k, v))
+			dst = append(dst, NewTag(k, v))
 		}
 	}
-	a.Sort()
-	return a
+	dst.Sort()
+	return dst
+}
+
+// numValidTags returns the number of entries in tags with a non-empty key
+// and value.
+func numValidTags(tags map[string]string) int {
+	n := len(tags)
+	for k, v := range tags {
+		if k == "" || v == "" {
+			n--
+		}
+	}
+	return n
 }
 
 func (t TagSet) Len() int           { return len(t) }
@@ -345,123 +364,25 @@ func (t TagSet) Serialize(name string) string {
 	return *(*string)(unsafe.Pointer(&b))
 }
 
+// serializeStackTags is the largest tag count SerializeTags/HashTags will
+// gather into a stack array before falling back to a heap allocation.
+const serializeStackTags = 16
+
 // SerializeTags serializes name and tags into a statsd stat.
 func SerializeTags(name string, tags map[string]string) string {
-	const prefix = ".__"
-	const sep = "="
-
-	// discard pairs where the tag or value is an empty string
-	numValid := len(tags)
-	for k, v := range tags {
-		if k == "" || v == "" {
-			numValid--
-		}
-	}
-
-	switch numValid {
-	case 0:
+	numValid := numValidTags(tags)
+	if numValid == 0 {
 		return name
-	case 1:
-		var t0 Tag
-		for k, v := range tags {
-			if k != "" && v != "" {
-				t0 = NewTag(k, v)
-				break
-			}
-		}
-		return name + prefix + t0.Key + sep + t0.Value
-	case 2:
-		var t0, t1 Tag
-		for k, v := range tags {
-			if k == "" || v == "" {
-				continue
-			}
-			t1 = t0
-			t0 = NewTag(k, v)
-		}
-		if t0.Key > t1.Key {
-			t0, t1 = t1, t0
-		}
-		return name + prefix + t0.Key + sep + t0.Value +
-			prefix + t1.Key + sep + t1.Value
-	case 3:
-		var t0, t1, t2 Tag
-		for k, v := range tags {
-			if k == "" || v == "" {
-				continue
-			}
-			t2 = t1
-			t1 = t0
-			t0 = NewTag(k, v)
-		}
-		if t1.Key > t2.Key {
-			t1, t2 = t2, t1
-		}
-		if t0.Key > t2.Key {
-			t0, t2 = t2, t0
-		}
-		if t0.Key > t1.Key {
-			t0, t1 = t1, t0
-		}
-		return name + prefix + t0.Key + sep + t0.Value +
-			prefix + t1.Key + sep + t1.Value +
-			prefix + t2.Key + sep + t2.Value
-	case 4:
-		var t0, t1, t2, t3 Tag
-		for k, v := range tags {
-			if k == "" || v == "" {
-				continue
-			}
-			t3 = t2
-			t2 = t1
-			t1 = t0
-			t0 = NewTag(k, v)
-		}
-		if t0.Key > t1.Key {
-			t0, t1 = t1, t0
-		}
-		if t2.Key > t3.Key {
-			t2, t3 = t3, t2
-		}
-		if t0.Key > t2.Key {
-			t0, t2 = t2, t0
-		}
-		if t1.Key > t3.Key {
-			t1, t3 = t3, t1
-		}
-		if t1.Key > t2.Key {
-			t1, t2 = t2, t1
-		}
-		return name + prefix + t0.Key + sep + t0.Value +
-			prefix + t1.Key + sep + t1.Value +
-			prefix + t2.Key + sep + t2.Value +
-			prefix + t3.Key + sep + t3.Value
-	default:
-		// n stores the length of the serialized name + tags
-		n := (len(prefix) + len(sep)) * numValid
-		n += len(name)
-
-		pairs := make(TagSet, 0, numValid)
-		for k, v := range tags {
-			if k == "" || v == "" {
-				continue
-			}
-			n += len(k) + len(v)
-			pairs = append(pairs, NewTag(k, v))
-		}
-		pairs.Sort()
-
-		// CEV: this is same as strings.Builder, but works with go1.9 and earlier
-		b := make([]byte, 0, n)
-		b = append(b, name...)
-		for _, tag := range pairs {
-			b = append(b, prefix...)
-			b = append(b, tag.Key...)
-			b = append(b, sep...)
-			b = append(b, tag.Value...)
-		}
-		return *(*string)(unsafe.Pointer(&b))
 	}
+
+	var arr [serializeStackTags]Tag
+	var dst TagSet
+	if numValid <= len(arr) {
+		dst = arr[:0]
+	} else {
+		dst = make(TagSet, 0, numValid)
+	}
+	return gatherValidTags(dst, tags).Serialize(name)
 }
 
 // ReplaceChars replaces any invalid chars ([.:|]) in value s with '_'.
