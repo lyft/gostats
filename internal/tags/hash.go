@@ -21,32 +21,21 @@ var (
 // overwhelming majority in practice) it performs zero heap allocations.
 // Longer serialized forms fall back to a single exact-size heap allocation.
 func HashTags(name string, tags map[string]string) (hi, lo uint64) {
-	numValid := len(tags)
-	for k, v := range tags {
-		if k == "" || v == "" {
-			numValid--
-		}
-	}
+	numValid := numValidTags(tags)
 	if numValid == 0 {
 		return hashSerialize(name, nil)
 	}
 
 	// Gather into a small stack array for the common case; only tag sets
 	// larger than this need a heap allocation for the gather itself.
-	var arr [16]Tag
-	var pairs TagSet
+	var arr [serializeStackTags]Tag
+	var dst TagSet
 	if numValid <= len(arr) {
-		pairs = arr[:0]
+		dst = arr[:0]
 	} else {
-		pairs = make(TagSet, 0, numValid)
+		dst = make(TagSet, 0, numValid)
 	}
-	for k, v := range tags {
-		if k != "" && v != "" {
-			pairs = append(pairs, NewTag(k, v))
-		}
-	}
-	pairs.Sort()
-	return hashSerialize(name, pairs)
+	return hashSerialize(name, gatherValidTags(dst, tags))
 }
 
 // Hash returns a 128-bit hash that uniquely identifies the canonical
