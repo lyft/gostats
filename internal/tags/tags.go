@@ -1,7 +1,7 @@
 package tags
 
 import (
-	"sort"
+	"slices"
 	"strings"
 	"unsafe"
 )
@@ -131,7 +131,21 @@ func (t TagSet) Sort() {
 		t.cas(3, 5)
 		t.cas(3, 4)
 	default:
-		sort.Sort(t)
+		slices.SortFunc(t, compareTags)
+	}
+}
+
+// compareTags orders Tags by Key, for use with slices.SortFunc. Using the
+// generic slices.SortFunc instead of sort.Sort avoids boxing the TagSet
+// into a sort.Interface, which otherwise allocates on every call.
+func compareTags(a, b Tag) int {
+	switch {
+	case a.Key < b.Key:
+		return -1
+	case a.Key > b.Key:
+		return 1
+	default:
+		return 0
 	}
 }
 
@@ -435,7 +449,7 @@ func SerializeTags(name string, tags map[string]string) string {
 			n += len(k) + len(v)
 			pairs = append(pairs, NewTag(k, v))
 		}
-		sort.Sort(pairs)
+		pairs.Sort()
 
 		// CEV: this is same as strings.Builder, but works with go1.9 and earlier
 		b := make([]byte, 0, n)
