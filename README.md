@@ -31,8 +31,9 @@ that varies per request - a user ID, a request ID, anything effectively unbounde
 memory without limit, because nothing ever removes an entry.
 
 Set `GOSTATS_PRUNE_IDLE_SECONDS` to prune counters and timers that have gone that many seconds
-without being written to. It is unset (disabled) by default, so existing behavior does not change
-unless you opt in.
+without changing value. (A write that doesn't change the value - `Add(0)`, or `Set` with the value
+it already holds - counts as idle, same as no write at all.) It is unset (disabled) by default, so
+existing behavior does not change unless you opt in.
 
 ```sh
 export GOSTATS_PRUNE_IDLE_SECONDS=60
@@ -63,6 +64,11 @@ visibility on too):
 * `gostats.pruned`, tagged `type=counter|timer` - how many were removed on a given flush. A
   sustained high rate means high-cardinality tags are actively being generated and pruned away -
   the leak is contained, but the tag usage generating it is still worth fixing at the source.
+
+Being gated on pruning means `gostats.tracked` can't tell you whether to turn pruning on in the
+first place - only a service that already suspects a cardinality problem and has opted in gets to
+watch it. Finding that problem before opting in is still a job for your metrics backend's own
+cardinality tooling.
 
 ## Mocking
 
