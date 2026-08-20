@@ -679,6 +679,37 @@ func TestPrunedCounterRaceWithFlush(t *testing.T) {
 	}
 }
 
+// NewStore derives pruneAfterFlushes from GOSTATS_PRUNE_IDLE_SECONDS and
+// the configured flush interval, rounding up so an idle metric always
+// survives at least the requested number of seconds.
+func TestNewStorePruneAfterFlushesFromSettings(t *testing.T) {
+	tests := []struct {
+		name             string
+		pruneIdleSecs    string
+		flushIntervalS   string
+		wantPruneFlushes uint32
+	}{
+		{"disabled by default", "", "", 0},
+		{"exact multiple", "60", "5", 12},
+		{"rounds up", "61", "5", 13},
+		{"minimum of one flush", "1", "5", 1},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			reset := testSetenv(t,
+				"GOSTATS_PRUNE_IDLE_SECONDS", tt.pruneIdleSecs,
+				"GOSTATS_FLUSH_INTERVAL_SECONDS", tt.flushIntervalS,
+			)
+			defer reset()
+
+			s := NewStore(nullSink{}, false).(*statStore)
+			if s.pruneAfterFlushes != tt.wantPruneFlushes {
+				t.Errorf("pruneAfterFlushes = %d, want %d", s.pruneAfterFlushes, tt.wantPruneFlushes)
+			}
+		})
+	}
+}
+
 func BenchmarkStore_MutexContention(b *testing.B) {
 	s := NewStore(nullSink{}, false)
 	t := time.NewTicker(500 * time.Microsecond) // we want flush to contend with accessing metrics

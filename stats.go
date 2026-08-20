@@ -214,7 +214,32 @@ type StatGenerator interface {
 // NewStore returns an Empty store that flushes to Sink passed as an argument.
 // Note: the export argument is unused.
 func NewStore(sink Sink, _ bool) Store {
-	return &statStore{sink: sink}
+	settings := GetSettings()
+	return &statStore{
+		sink:              sink,
+		pruneAfterFlushes: pruneAfterFlushesFromSettings(settings),
+	}
+}
+
+// pruneAfterFlushesFromSettings converts PruneIdleSeconds into a number of
+// flushes, rounding up so an idle counter or timer always survives at
+// least the requested number of seconds. It assumes the store is flushed
+// at settings.FlushIntervalS; a caller that drives Start with its own
+// ticker of a different period will see idle entries pruned after that
+// many of its own flushes instead, not after PruneIdleSeconds of wall time.
+func pruneAfterFlushesFromSettings(settings Settings) uint32 {
+	if settings.PruneIdleSeconds <= 0 {
+		return 0
+	}
+	flushIntervalS := settings.FlushIntervalS
+	if flushIntervalS <= 0 {
+		flushIntervalS = DefaultFlushIntervalS
+	}
+	n := (settings.PruneIdleSeconds + flushIntervalS - 1) / flushIntervalS // ceil
+	if n < 1 {
+		n = 1
+	}
+	return uint32(n)
 }
 
 // NewDefaultStore returns a Store with a TCP statsd sink, and a running flush timer.
