@@ -455,6 +455,19 @@ func (s *statStore) Start(ticker *time.Ticker) {
 	s.StartContext(context.Background(), ticker)
 }
 
+// Internal observability for the pruning mechanism above: gostats.tracked
+// reports live map sizes every flush regardless of whether pruning is
+// enabled, so a service can see a cardinality problem before opting in.
+// gostats.pruned reports eviction counts, for alerting on churn once
+// pruning is enabled.
+const (
+	trackedCountersName = "gostats.tracked.__type=counter"
+	trackedGaugesName   = "gostats.tracked.__type=gauge"
+	trackedTimersName   = "gostats.tracked.__type=timer"
+	prunedCountersName  = "gostats.pruned.__type=counter"
+	prunedTimersName    = "gostats.pruned.__type=timer"
+)
+
 func (s *statStore) Flush() {
 	s.mu.RLock()
 	for _, g := range s.statGenerators {
@@ -462,50 +475,79 @@ func (s *statStore) Flush() {
 	}
 	s.mu.RUnlock()
 
+	var liveCounters, prunedCounters int64
 	s.counters.Range(func(key, v interface{}) bool {
 		c := v.(*counter)
 		// do not flush counters that are set to zero
 		if value := c.latch(); value != 0 {
 			s.sink.FlushCounter(key.(string), value)
 			atomic.StoreUint32(&c.idleFlushes, 0)
+			liveCounters++
 			return true
 		}
-		if s.pruneAfterFlushes > 0 && atomic.AddUint32(&c.idleFlushes, 1) >= s.pruneAfterFlushes {
-			// Delete before marking detached: this guarantees that by the
-			// time a concurrent write can observe detached != 0, the
-			// delete has already happened, so its rejoin() never finds c
-			// still present and wrongly concludes it's still attached.
-			s.counters.Delete(key)
-			atomic.StoreUint32(&c.detached, 1)
-			// A write may have raced between the original latch() above
-			// and the delete just now. Catch it here instead of leaving
-			// it stranded until c's next write, which may never come.
-			if v := c.latch(); v != 0 {
-				s.sink.FlushCounter(key.(string), v)
-				c.rejoin()
-			}
+		if s.pruneAfterFlushes == 0 || atomic.AddUint32(&c.idleFlushes, 1) < s.pruneAfterFlushes {
+			liveCounters++
+			return true
+		}
+		// Delete before marking detached: this guarantees that by the
+		// time a concurrent write can observe detached != 0, the delete
+		// has already happened, so its rejoin() never finds c still
+		// present and wrongly concludes it's still attached.
+		s.counters.Delete(key)
+		atomic.StoreUint32(&c.detached, 1)
+		// A write may have raced between the original latch() above and
+		// the delete just now. Catch it here instead of leaving it
+		// stranded until c's next write, which may never come.
+		if v := c.latch(); v != 0 {
+			s.sink.FlushCounter(key.(string), v)
+			c.rejoin()
+			liveCounters++
+		} else {
+			prunedCounters++
 		}
 		return true
 	})
 
-	if s.pruneAfterFlushes > 0 {
-		s.timers.Range(func(key, v interface{}) bool {
-			t := v.(*timer)
-			if atomic.SwapUint32(&t.active, 0) != 0 {
-				atomic.StoreUint32(&t.idleFlushes, 0)
-				return true
-			}
-			if atomic.AddUint32(&t.idleFlushes, 1) >= s.pruneAfterFlushes {
-				s.timers.Delete(key)
-			}
+	var liveTimers, prunedTimers int64
+	s.timers.Range(func(key, v interface{}) bool {
+		t := v.(*timer)
+		if atomic.SwapUint32(&t.active, 0) != 0 {
+			atomic.StoreUint32(&t.idleFlushes, 0)
+			liveTimers++
 			return true
-		})
-	}
+		}
+		if s.pruneAfterFlushes == 0 || atomic.AddUint32(&t.idleFlushes, 1) < s.pruneAfterFlushes {
+			liveTimers++
+			return true
+		}
+		s.timers.Delete(key)
+		prunedTimers++
+		return true
+	})
 
+	var liveGauges int64
 	s.gauges.Range(func(key, v interface{}) bool {
 		s.sink.FlushGauge(key.(string), v.(*gauge).Value())
+		liveGauges++
 		return true
 	})
+
+	// Gated behind pruning being enabled: emitting these unconditionally
+	// would add three new gauge series to the wire output of every store
+	// in the fleet, including the vast majority that never opt in. The
+	// ticket's ask is for evictions to be observable, which only applies
+	// once eviction is happening at all.
+	if s.pruneAfterFlushes > 0 {
+		s.sink.FlushGauge(trackedCountersName, uint64(liveCounters))
+		s.sink.FlushGauge(trackedGaugesName, uint64(liveGauges))
+		s.sink.FlushGauge(trackedTimersName, uint64(liveTimers))
+		if prunedCounters != 0 {
+			s.sink.FlushCounter(prunedCountersName, uint64(prunedCounters))
+		}
+		if prunedTimers != 0 {
+			s.sink.FlushCounter(prunedTimersName, uint64(prunedTimers))
+		}
+	}
 
 	flushableSink, ok := s.sink.(FlushableSink)
 	if ok {

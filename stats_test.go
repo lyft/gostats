@@ -710,6 +710,78 @@ func TestNewStorePruneAfterFlushesFromSettings(t *testing.T) {
 	}
 }
 
+// gostats.tracked reports live map sizes every flush - the cardinality
+// signal the ticket asks for - regardless of whether pruning is enabled,
+// so a service can see a cardinality problem before opting into pruning.
+func TestStatsStoreTrackedAndPrunedMetrics(t *testing.T) {
+	sink := mock.NewSink()
+	const threshold = 2
+	s := &statStore{sink: sink, pruneAfterFlushes: threshold}
+
+	s.NewCounter("a")
+	s.NewCounter("b")
+	s.NewGauge("g")
+	s.NewTimer("t1")
+	s.NewTimer("t2")
+	s.NewTimer("t3")
+
+	s.Flush() // idleFlushes -> 1 for all (never written): below threshold
+
+	assertGauge := func(name string, want uint64) {
+		t.Helper()
+		got, ok := sink.LoadGauge(name)
+		if !ok || got != want {
+			t.Errorf("LoadGauge(%q) = (%d, %v), want (%d, true)", name, got, ok, want)
+		}
+	}
+
+	assertGauge("gostats.tracked.__type=counter", 2)
+	assertGauge("gostats.tracked.__type=gauge", 1)
+	assertGauge("gostats.tracked.__type=timer", 3)
+
+	if _, ok := sink.LoadCounter("gostats.pruned.__type=counter"); ok {
+		t.Errorf("gostats.pruned.__type=counter reported before anything was pruned")
+	}
+
+	s.Flush() // idleFlushes -> 2: reaches threshold, non-gauges pruned
+
+	assertGauge("gostats.tracked.__type=counter", 0)
+	assertGauge("gostats.tracked.__type=gauge", 1) // gauges are never pruned
+	assertGauge("gostats.tracked.__type=timer", 0)
+
+	if got, ok := sink.LoadCounter("gostats.pruned.__type=counter"); !ok || got != 2 {
+		t.Errorf("LoadCounter(gostats.pruned.__type=counter) = (%d, %v), want (2, true)", got, ok)
+	}
+	if got, ok := sink.LoadCounter("gostats.pruned.__type=timer"); !ok || got != 3 {
+		t.Errorf("LoadCounter(gostats.pruned.__type=timer) = (%d, %v), want (3, true)", got, ok)
+	}
+}
+
+// Observability metrics are gated behind pruning being enabled: emitting
+// them unconditionally would add three new gauge series to the wire
+// output of every store in the fleet, including stores that never opt
+// into pruning at all. This also protects existing consumers that assert
+// on exact sink output from seeing it change out from under them.
+func TestStatsStoreNoTrackedMetricsWithoutPruning(t *testing.T) {
+	sink := mock.NewSink()
+	s := &statStore{sink: sink} // pruning disabled
+
+	s.NewCounter("a")
+	s.NewTimer("t")
+	s.NewGauge("g")
+	s.Flush()
+
+	for _, name := range []string{
+		"gostats.tracked.__type=counter",
+		"gostats.tracked.__type=timer",
+		"gostats.tracked.__type=gauge",
+	} {
+		if _, ok := sink.LoadGauge(name); ok {
+			t.Errorf("LoadGauge(%q) found a value, want absent (pruning disabled)", name)
+		}
+	}
+}
+
 func BenchmarkStore_MutexContention(b *testing.B) {
 	s := NewStore(nullSink{}, false)
 	t := time.NewTicker(500 * time.Microsecond) // we want flush to contend with accessing metrics
