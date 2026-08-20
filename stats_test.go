@@ -518,6 +518,167 @@ func TestStatsStorePruneDisabledByDefault(t *testing.T) {
 	}
 }
 
+// A held Counter reference must not silently stop reporting after being
+// pruned for going idle - the next write must reattach it to the store.
+// This is what makes pruning safe for the common pattern of resolving a
+// Counter once and holding it in a struct field for the process lifetime.
+func TestPrunedCounterRejoinsOnWrite(t *testing.T) {
+	sink := mock.NewSink()
+	const threshold = 3
+	s := &statStore{sink: sink, pruneAfterFlushes: threshold}
+
+	c := s.NewCounter("reattaches")
+
+	// Age it out.
+	for i := 0; i < threshold; i++ {
+		s.Flush()
+	}
+	if got := mapLen(&s.counters); got != 0 {
+		t.Fatalf("len(counters) = %d, want 0 (should have been pruned)", got)
+	}
+
+	// The held reference is written to again after being pruned.
+	c.Inc()
+	s.Flush()
+
+	if got, ok := sink.LoadCounter("reattaches"); !ok || got != 1 {
+		t.Errorf("LoadCounter(%q) = (%d, %v), want (1, true)", "reattaches", got, ok)
+	}
+}
+
+// Rejoin must work via Set(), not just Add()/Inc() - they update
+// currentValue through separate call sites.
+func TestPrunedCounterRejoinsOnSet(t *testing.T) {
+	sink := mock.NewSink()
+	const threshold = 3
+	s := &statStore{sink: sink, pruneAfterFlushes: threshold}
+
+	c := s.NewCounter("reattaches_via_set")
+	for i := 0; i < threshold; i++ {
+		s.Flush()
+	}
+	if got := mapLen(&s.counters); got != 0 {
+		t.Fatalf("len(counters) = %d, want 0 (should have been pruned)", got)
+	}
+
+	c.Set(5)
+	s.Flush()
+
+	if got, ok := sink.LoadCounter("reattaches_via_set"); !ok || got != 5 {
+		t.Errorf("LoadCounter(%q) = (%d, %v), want (5, true)", "reattaches_via_set", got, ok)
+	}
+}
+
+// If a fresh lookup creates a new counter under the same name while the
+// original, still-held counter sits detached, the original must fold its
+// pending delta into the new one on its next write rather than losing it.
+func TestPrunedCounterRejoinLosesRace(t *testing.T) {
+	sink := mock.NewSink()
+	const threshold = 3
+	s := &statStore{sink: sink, pruneAfterFlushes: threshold}
+
+	held := s.NewCounter("contested")
+	for i := 0; i < threshold; i++ {
+		s.Flush()
+	}
+	if got := mapLen(&s.counters); got != 0 {
+		t.Fatalf("len(counters) = %d, want 0 (should have been pruned)", got)
+	}
+
+	// A fresh, unrelated lookup recreates the name before the held
+	// reference writes again.
+	fresh := s.NewCounter("contested")
+	fresh.Inc()
+
+	// The original, still-held reference is written to after that.
+	held.Inc()
+	s.Flush()
+
+	if got, ok := sink.LoadCounter("contested"); !ok || got != 2 {
+		t.Errorf("LoadCounter(%q) = (%d, %v), want (2, true)", "contested", got, ok)
+	}
+}
+
+// A held Timer reference must keep working after being pruned. Timers are
+// stateless - AddValue writes straight to the sink - so this requires no
+// rejoin machinery at all, unlike counters.
+func TestPrunedTimerStillEmits(t *testing.T) {
+	sink := mock.NewSink()
+	const threshold = 3
+	s := &statStore{sink: sink, pruneAfterFlushes: threshold}
+
+	tm := s.NewTimer("prunable_timer")
+	for i := 0; i < threshold; i++ {
+		s.Flush()
+	}
+	if got := mapLen(&s.timers); got != 0 {
+		t.Fatalf("len(timers) = %d, want 0 (should have been pruned)", got)
+	}
+
+	tm.AddValue(42)
+
+	if got, ok := sink.LoadTimer("prunable_timer"); !ok || got != 42 {
+		t.Errorf("LoadTimer(%q) = (%v, %v), want (42, true)", "prunable_timer", got, ok)
+	}
+}
+
+// Concurrent increments must never be lost to a race between a writer and
+// the flush goroutine pruning the same counter for having gone idle.
+// threshold=1 makes every idle flush attempt a prune, maximizing exposure
+// to the race window between Flush's original latch and the delete.
+func TestPrunedCounterRaceWithFlush(t *testing.T) {
+	sink := mock.NewSink()
+	const threshold = 1
+	s := &statStore{sink: sink, pruneAfterFlushes: threshold}
+
+	c := s.NewCounter("raced")
+
+	const goroutines = 8
+	const incrementsPerGoroutine = 2000
+	var wg sync.WaitGroup
+	wg.Add(goroutines)
+	for g := 0; g < goroutines; g++ {
+		go func() {
+			defer wg.Done()
+			for i := 0; i < incrementsPerGoroutine; i++ {
+				c.Inc()
+			}
+		}()
+	}
+
+	stop := make(chan struct{})
+	var flushWg sync.WaitGroup
+	flushWg.Add(1)
+	go func() {
+		defer flushWg.Done()
+		for {
+			select {
+			case <-stop:
+				return
+			default:
+				s.Flush()
+			}
+		}
+	}()
+
+	wg.Wait()
+	close(stop)
+	flushWg.Wait()
+
+	// One final write+flush guarantees a fully deterministic drain: if c
+	// is detached at this point, Inc() reattaches it (nothing else ever
+	// looks up this name, so rejoin always wins), and the following
+	// Flush reports the total. This removes any timing dependence on
+	// exactly when the last racing increment landed.
+	c.Inc()
+	s.Flush()
+
+	want := uint64(goroutines*incrementsPerGoroutine + 1)
+	if got, _ := sink.LoadCounter("raced"); got != want {
+		t.Errorf("LoadCounter(%q) = %d, want %d", "raced", got, want)
+	}
+}
+
 func BenchmarkStore_MutexContention(b *testing.B) {
 	s := NewStore(nullSink{}, false)
 	t := time.NewTicker(500 * time.Microsecond) // we want flush to contend with accessing metrics

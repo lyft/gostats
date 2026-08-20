@@ -242,14 +242,53 @@ type counter struct {
 	// counter reported a zero delta. Reset to 0 whenever it reports a
 	// nonzero delta. Used to prune idle counters; see statStore.Flush.
 	idleFlushes uint32
+	// detached is set when statStore.Flush removes this counter from the
+	// store for being idle. A subsequent write reattaches it (see
+	// maybeRejoin/rejoin) so a reference held past pruning keeps working.
+	detached uint32
+	// store and name are set at creation only when pruning is enabled
+	// (store == nil otherwise), so maybeRejoin is a single pointer
+	// comparison - no atomic load - on the hot path when it's not.
+	store *statStore
+	name  string
 }
 
 func (c *counter) Add(delta uint64) {
 	atomic.AddUint64(&c.currentValue, delta)
+	c.maybeRejoin()
 }
 
 func (c *counter) Set(value uint64) {
 	atomic.StoreUint64(&c.currentValue, value)
+	c.maybeRejoin()
+}
+
+// maybeRejoin reattaches the counter to its store if it was pruned for
+// being idle. c.store is nil whenever pruning is disabled, making this a
+// single non-atomic pointer read on that (the common) path.
+func (c *counter) maybeRejoin() {
+	if c.store != nil && atomic.LoadUint32(&c.detached) != 0 {
+		c.rejoin()
+	}
+}
+
+// rejoin reattaches a detached counter to its store under its original
+// name. If another counter has since claimed that name - because a fresh
+// lookup created one while c sat detached - c folds its pending delta into
+// that counter and remains detached, so it keeps forwarding on later
+// writes instead of leaving them stranded.
+func (c *counter) rejoin() {
+	v, loaded := c.store.counters.LoadOrStore(c.name, c)
+	if !loaded {
+		atomic.StoreUint32(&c.detached, 0)
+		return
+	}
+	if other := v.(*counter); other != c {
+		other.Add(c.latch())
+	} else {
+		// A concurrent write already reattached us.
+		atomic.StoreUint32(&c.detached, 0)
+	}
 }
 
 func (c *counter) Inc() {
@@ -407,7 +446,19 @@ func (s *statStore) Flush() {
 			return true
 		}
 		if s.pruneAfterFlushes > 0 && atomic.AddUint32(&c.idleFlushes, 1) >= s.pruneAfterFlushes {
+			// Delete before marking detached: this guarantees that by the
+			// time a concurrent write can observe detached != 0, the
+			// delete has already happened, so its rejoin() never finds c
+			// still present and wrongly concludes it's still attached.
 			s.counters.Delete(key)
+			atomic.StoreUint32(&c.detached, 1)
+			// A write may have raced between the original latch() above
+			// and the delete just now. Catch it here instead of leaving
+			// it stranded until c's next write, which may never come.
+			if v := c.latch(); v != 0 {
+				s.sink.FlushCounter(key.(string), v)
+				c.rejoin()
+			}
 		}
 		return true
 	})
@@ -461,6 +512,10 @@ func (s *statStore) newCounter(serializedName string) *counter {
 		return v.(*counter)
 	}
 	c := new(counter)
+	if s.pruneAfterFlushes > 0 {
+		c.store = s
+		c.name = serializedName
+	}
 	if v, loaded := s.counters.LoadOrStore(serializedName, c); loaded {
 		return v.(*counter)
 	}
