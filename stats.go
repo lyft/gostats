@@ -2,6 +2,7 @@ package stats
 
 import (
 	"context"
+	"math"
 	"strconv"
 	"sync"
 	"sync/atomic"
@@ -214,30 +215,42 @@ type StatGenerator interface {
 // NewStore returns an Empty store that flushes to Sink passed as an argument.
 // Note: the export argument is unused.
 func NewStore(sink Sink, _ bool) Store {
-	settings := GetSettings()
 	return &statStore{
 		sink:              sink,
-		pruneAfterFlushes: pruneAfterFlushesFromSettings(settings),
+		pruneAfterFlushes: pruneAfterFlushesFromEnv(),
 	}
 }
 
-// pruneAfterFlushesFromSettings converts PruneIdleSeconds into a number of
-// flushes, rounding up so an idle counter or timer always survives at
-// least the requested number of seconds. It assumes the store is flushed
-// at settings.FlushIntervalS; a caller that drives Start with its own
-// ticker of a different period will see idle entries pruned after that
-// many of its own flushes instead, not after PruneIdleSeconds of wall time.
-func pruneAfterFlushesFromSettings(settings Settings) uint32 {
-	if settings.PruneIdleSeconds <= 0 {
+// pruneAfterFlushesFromEnv reads only GOSTATS_PRUNE_IDLE_SECONDS and
+// GOSTATS_FLUSH_INTERVAL_SECONDS - not the full Settings via GetSettings,
+// which would make NewStore panic on a malformed value for any gostats
+// env var, including ones it has nothing to do with (a service passing
+// its own sink specifically to bypass env-driven config could still be
+// broken by an unrelated typo, e.g. in STATSD_PORT). A malformed value
+// for either of these two falls back to disabled/default rather than
+// panicking: failing construction outright over a typo in this one
+// opt-in knob is worse than silently not pruning. NewDefaultStore, the
+// documented fully-environment-driven constructor, keeps GetSettings's
+// existing fail-fast behavior.
+//
+// The result converts PruneIdleSeconds into a number of flushes, rounding
+// up so an idle counter or timer always survives at least the requested
+// number of seconds. It assumes the store is flushed at that interval; a
+// caller that drives Start with its own ticker of a different period will
+// see idle entries pruned after that many of its own flushes instead, not
+// after PruneIdleSeconds of wall time.
+func pruneAfterFlushesFromEnv() uint32 {
+	pruneIdleSeconds, err := envInt("GOSTATS_PRUNE_IDLE_SECONDS", DefaultPruneIdleSeconds)
+	if err != nil || pruneIdleSeconds <= 0 {
 		return 0
 	}
-	flushIntervalS := settings.FlushIntervalS
-	if flushIntervalS <= 0 {
+	flushIntervalS, err := envInt("GOSTATS_FLUSH_INTERVAL_SECONDS", DefaultFlushIntervalS)
+	if err != nil || flushIntervalS <= 0 {
 		flushIntervalS = DefaultFlushIntervalS
 	}
-	n := (settings.PruneIdleSeconds + flushIntervalS - 1) / flushIntervalS // ceil
-	if n < 1 {
-		n = 1
+	n := (pruneIdleSeconds + flushIntervalS - 1) / flushIntervalS // ceil; both operands >= 1, so n >= 1 always
+	if n > math.MaxUint32 {
+		n = math.MaxUint32 // clamp: silently wrapping could turn "never prune" into "prune every flush"
 	}
 	return uint32(n)
 }
@@ -302,18 +315,26 @@ func (c *counter) maybeRejoin() {
 // lookup created one while c sat detached - c folds its pending delta into
 // that counter and remains detached, so it keeps forwarding on later
 // writes instead of leaving them stranded.
+//
+// rejoin never clears c.detached itself. Only Flush does that (see the
+// active branch of its counters.Range below), and only at a point where
+// it has just confirmed, via that same Range callback, that c is
+// currently and genuinely present in the map. If rejoin cleared it here
+// instead, based on this LoadOrStore having (at some point in the past)
+// found or made c the map's occupant, a concurrent Flush could delete and
+// re-detach c in the gap between that observation and the clear - c would
+// then sit outside the map with detached == 0, and maybeRejoin would
+// never fire again: a permanent orphan. Not touching the flag here closes
+// that window entirely rather than narrowing it.
 func (c *counter) rejoin() {
 	v, loaded := c.store.counters.LoadOrStore(c.name, c)
 	if !loaded {
-		atomic.StoreUint32(&c.detached, 0)
 		return
 	}
 	if other := v.(*counter); other != c {
 		other.Add(c.latch())
-	} else {
-		// A concurrent write already reattached us.
-		atomic.StoreUint32(&c.detached, 0)
 	}
+	// other == c: a concurrent write already reattached us. Nothing to do.
 }
 
 func (c *counter) Inc() {
@@ -328,10 +349,33 @@ func (c *counter) String() string {
 	return strconv.FormatUint(c.Value(), 10)
 }
 
+// latch reports the delta since the last latch and advances lastSentValue
+// to the current value. It was only ever called from the single Flush
+// goroutine's Range before rejoin's forwarding path existed (see rejoin):
+// that path calls c.latch() from whatever goroutine is writing to a
+// permanently-detached, forwarding counter, so latch must tolerate
+// concurrent callers on the same object.
+//
+// A plain Load-then-Swap is not safe for that: the two are separate
+// atomic operations, and nothing stops a second caller's whole
+// read-then-swap from completing in between this caller's read and its
+// own swap. A caller whose read is by then stale would swap its smaller
+// value in over a larger one already committed - underflowing its own
+// delta and regressing lastSentValue backwards, corrupting the next
+// caller's delta too. The CAS loop below only commits a read that is
+// still current at the moment it commits; a caller that loses the race
+// retries against fresh values instead of committing a stale one.
 func (c *counter) latch() uint64 {
-	value := c.Value()
-	lastSent := atomic.SwapUint64(&c.lastSentValue, value)
-	return value - lastSent
+	for {
+		value := c.Value()
+		lastSent := atomic.LoadUint64(&c.lastSentValue)
+		if value == lastSent {
+			return 0
+		}
+		if atomic.CompareAndSwapUint64(&c.lastSentValue, lastSent, value) {
+			return value - lastSent
+		}
+	}
 }
 
 type gauge struct {
@@ -425,6 +469,17 @@ type statStore struct {
 	// which a counter or timer is removed from the store. Zero (the zero
 	// value, and the default from Settings) disables pruning entirely,
 	// preserving today's unbounded-retention behavior.
+	//
+	// Must not be mutated after construction. Every counter created by
+	// this store has its own store/name fields (see counter, newCounter)
+	// set based on this field's value AT CREATION time; Flush's prune
+	// branch later reads this SAME field to decide whether to delete
+	// that counter. Changing it in between would desync the two: a
+	// counter created while this was 0 has store == nil, so a later
+	// prune (if this were then set nonzero) would delete it with no way
+	// for a write to ever rejoin it. NewStore only ever sets this once,
+	// so the public API can't hit this - it would take reaching into the
+	// unexported statStore directly, which only same-package code can do.
 	pruneAfterFlushes uint32
 }
 
@@ -455,11 +510,13 @@ func (s *statStore) Start(ticker *time.Ticker) {
 	s.StartContext(context.Background(), ticker)
 }
 
-// Internal observability for the pruning mechanism above: gostats.tracked
-// reports live map sizes every flush regardless of whether pruning is
-// enabled, so a service can see a cardinality problem before opting in.
-// gostats.pruned reports eviction counts, for alerting on churn once
-// pruning is enabled.
+// Internal observability for the pruning mechanism above, both gated
+// behind pruning being enabled (see the "if s.pruneAfterFlushes > 0"
+// block in Flush below) - emitting them unconditionally would add three
+// gauge series to every store's wire output, including stores that never
+// opt in, and breaks tests that assert exact sink output. gostats.tracked
+// reports live map sizes; gostats.pruned reports eviction counts, for
+// alerting on churn once pruning is enabled.
 const (
 	trackedCountersName = "gostats.tracked.__type=counter"
 	trackedGaugesName   = "gostats.tracked.__type=gauge"
@@ -482,6 +539,11 @@ func (s *statStore) Flush() {
 		if value := c.latch(); value != 0 {
 			s.sink.FlushCounter(key.(string), value)
 			atomic.StoreUint32(&c.idleFlushes, 0)
+			// The only place detached is ever cleared: right here, having
+			// just confirmed via this Range callback that c is currently
+			// in the map. See the comment on rejoin for why clearing it
+			// from a write's rejoin() instead would be unsafe.
+			atomic.StoreUint32(&c.detached, 0)
 			liveCounters++
 			return true
 		}
@@ -489,10 +551,11 @@ func (s *statStore) Flush() {
 			liveCounters++
 			return true
 		}
-		// Delete before marking detached: this guarantees that by the
-		// time a concurrent write can observe detached != 0, the delete
-		// has already happened, so its rejoin() never finds c still
-		// present and wrongly concludes it's still attached.
+		// Delete before marking detached. Not load-bearing for
+		// correctness on its own - rejoin() never clears detached (see
+		// its comment), so a write that races in either order still
+		// resolves correctly - but it shrinks the window where the flag
+		// says detached while c is still actually present in the map.
 		s.counters.Delete(key)
 		atomic.StoreUint32(&c.detached, 1)
 		// A write may have raced between the original latch() above and
@@ -500,6 +563,7 @@ func (s *statStore) Flush() {
 		// stranded until c's next write, which may never come.
 		if v := c.latch(); v != 0 {
 			s.sink.FlushCounter(key.(string), v)
+			atomic.StoreUint32(&c.idleFlushes, 0)
 			c.rejoin()
 			liveCounters++
 		} else {

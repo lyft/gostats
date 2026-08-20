@@ -5,12 +5,14 @@ import (
 	crand "crypto/rand"
 	"encoding/hex"
 	"fmt"
+	"math"
 	"math/rand"
 	"reflect"
 	"runtime"
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 	"unsafe"
@@ -684,7 +686,7 @@ func TestPrunedCounterRaceWithFlush(t *testing.T) {
 // NewStore derives pruneAfterFlushes from GOSTATS_PRUNE_IDLE_SECONDS and
 // the configured flush interval, rounding up so an idle metric always
 // survives at least the requested number of seconds.
-func TestNewStorePruneAfterFlushesFromSettings(t *testing.T) {
+func TestNewStorePruneAfterFlushesFromEnv(t *testing.T) {
 	tests := []struct {
 		name             string
 		pruneIdleSecs    string
@@ -712,9 +714,74 @@ func TestNewStorePruneAfterFlushesFromSettings(t *testing.T) {
 	}
 }
 
-// gostats.tracked reports live map sizes every flush - the cardinality
-// signal the ticket asks for - regardless of whether pruning is enabled,
-// so a service can see a cardinality problem before opting into pruning.
+// NewStore must not panic on a malformed env var that has nothing to do
+// with pruning: it previously called nothing environment-related at all,
+// and a caller providing its own sink specifically to bypass env-driven
+// config (tests, DI-style setups) shouldn't have that broadened into "any
+// gostats env var typo crashes construction" as a side effect of this
+// feature. NewDefaultStore, which is documented as the fully
+// environment-driven constructor, keeps its existing fail-fast behavior.
+func TestNewStoreToleratesUnrelatedMalformedEnvVar(t *testing.T) {
+	reset := testSetenv(t, "STATSD_PORT", "not-an-int")
+	defer reset()
+
+	defer func() {
+		if r := recover(); r != nil {
+			t.Fatalf("NewStore panicked on an unrelated malformed env var: %v", r)
+		}
+	}()
+	NewStore(nullSink{}, false)
+}
+
+// A malformed value for one of the two env vars NewStore actually reads
+// must fall back to disabling pruning (for GOSTATS_PRUNE_IDLE_SECONDS) or
+// the default flush interval (for GOSTATS_FLUSH_INTERVAL_SECONDS),
+// rather than panicking - construction failing outright over a typo in
+// this one opt-in knob is a worse outcome than silently not pruning.
+func TestNewStoreToleratesOwnMalformedEnvVars(t *testing.T) {
+	t.Run("PruneIdleSeconds", func(t *testing.T) {
+		reset := testSetenv(t, "GOSTATS_PRUNE_IDLE_SECONDS", "not-an-int")
+		defer reset()
+		s := NewStore(nullSink{}, false).(*statStore)
+		if s.pruneAfterFlushes != 0 {
+			t.Errorf("pruneAfterFlushes = %d, want 0 (disabled on malformed input)", s.pruneAfterFlushes)
+		}
+	})
+
+	t.Run("FlushIntervalSeconds", func(t *testing.T) {
+		reset := testSetenv(t,
+			"GOSTATS_PRUNE_IDLE_SECONDS", "10",
+			"GOSTATS_FLUSH_INTERVAL_SECONDS", "not-an-int",
+		)
+		defer reset()
+		s := NewStore(nullSink{}, false).(*statStore)
+		// Falls back to DefaultFlushIntervalS (5): ceil(10/5) = 2.
+		if s.pruneAfterFlushes != 2 {
+			t.Errorf("pruneAfterFlushes = %d, want 2 (falls back to the default flush interval)", s.pruneAfterFlushes)
+		}
+	})
+}
+
+// A PruneIdleSeconds large enough to overflow uint32 after the
+// seconds-to-flushes conversion must clamp, not wrap around - wrapping
+// could turn "practically never prune" into "prune on every flush", the
+// worst possible misreading of the operator's intent.
+func TestNewStorePruneAfterFlushesClampsOnOverflow(t *testing.T) {
+	reset := testSetenv(t,
+		"GOSTATS_PRUNE_IDLE_SECONDS", "21474836485", // / 5 ceils to 4294967297, wraps to 1 if cast blindly
+		"GOSTATS_FLUSH_INTERVAL_SECONDS", "5",
+	)
+	defer reset()
+	s := NewStore(nullSink{}, false).(*statStore)
+	if s.pruneAfterFlushes != math.MaxUint32 {
+		t.Errorf("pruneAfterFlushes = %d, want %d (clamped, not wrapped)", s.pruneAfterFlushes, uint32(math.MaxUint32))
+	}
+}
+
+// gostats.tracked reports live map sizes every flush once pruning is
+// enabled - the cardinality signal the ticket asks for. It's gated on
+// pruning being on (see TestStatsStoreNoTrackedMetricsWithoutPruning), so
+// this test enables it explicitly rather than relying on the default.
 func TestStatsStoreTrackedAndPrunedMetrics(t *testing.T) {
 	sink := mock.NewSink()
 	const threshold = 2
@@ -781,6 +848,173 @@ func TestStatsStoreNoTrackedMetricsWithoutPruning(t *testing.T) {
 		if _, ok := sink.LoadGauge(name); ok {
 			t.Errorf("LoadGauge(%q) found a value, want absent (pruning disabled)", name)
 		}
+	}
+}
+
+// TestPrunedCounterIntermittentWriteNeverOrphans stresses the specific
+// shape that exposed a permanent-orphan bug during development: a single
+// held counter written intermittently against a store pruning as
+// aggressively as possible (threshold=1). A continuously-hammered counter
+// (see TestPrunedCounterRaceWithFlush) rarely goes idle, so it rarely
+// reaches the prune branch at all; gaps between writes are what let the
+// flusher's Range actually visit an idle-but-about-to-be-written-again
+// counter, which is where the bug lived.
+//
+// The bug: rejoin() used to clear c.detached unconditionally, based on
+// its LoadOrStore having reinserted c into the map. If the flusher
+// deleted and re-detached c again in the gap between that LoadOrStore and
+// the clear, the clear then landed after the second prune and left c
+// outside the map with detached == 0 - a state maybeRejoin can never
+// recover from, since it never calls rejoin() when detached reads 0.
+// Every future write on that held reference was silently dropped forever.
+//
+// Fixed by never clearing detached from rejoin(): only Flush's own
+// active branch does, and only at a point where it has just confirmed,
+// via that same Range callback, that the counter is currently in the
+// map. See the comments on counter.rejoin and the active branch of
+// statStore.Flush's counters.Range.
+func TestPrunedCounterIntermittentWriteNeverOrphans(t *testing.T) {
+	sink := mock.NewSink()
+	const threshold = 1
+	s := &statStore{sink: sink, pruneAfterFlushes: threshold}
+
+	c := s.NewCounter("intermittent")
+
+	// A brief sleep between writes, not runtime.Gosched, is what actually
+	// exposes the bug: it needs to be a real, if tiny, gap - long enough
+	// for the tight-looping flusher to complete two full Flush cycles
+	// inside it. The write's own Add() always leaves a pending delta the
+	// very next flush drains via the active branch; only a *second*
+	// flush within the same gap can find the counter idle again and
+	// re-prune it. Verified empirically against the pre-fix code: this
+	// shape lost a substantial fraction of increments in roughly 1 run
+	// in 15, where a continuously-hammering multi-writer version (see
+	// TestPrunedCounterRaceWithFlush) essentially never reached the
+	// prune branch at all for the contended key.
+	const writes = 300
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		for i := 0; i < writes; i++ {
+			c.Inc()
+			time.Sleep(50 * time.Microsecond)
+		}
+	}()
+
+loop:
+	for {
+		select {
+		case <-done:
+			break loop
+		default:
+			s.Flush()
+		}
+	}
+
+	// Deterministic drain: if c is currently detached, this Inc()
+	// reattaches it (nothing else ever looks up this name), and the
+	// following Flush reports the total - removing any dependence on
+	// exactly when the last write landed relative to the last prune.
+	c.Inc()
+	s.Flush()
+
+	want := uint64(writes + 1)
+	if got, ok := sink.LoadCounter("intermittent"); !ok || got != want {
+		t.Errorf("LoadCounter(%q) = (%d, %v), want (%d, true)", "intermittent", got, ok, want)
+	}
+}
+
+// counter.latch was only ever called from the single Flush goroutine's
+// Range before rejoin's forwarding path existed. That path calls
+// c.latch() from whatever goroutine is writing to a permanently-detached,
+// forwarding counter (see rejoin), so latch must now tolerate concurrent
+// callers on the same object.
+//
+// The old implementation - value := c.Value(); lastSent :=
+// atomic.SwapUint64(&c.lastSentValue, value); return value - lastSent -
+// reads and swaps as two separate atomic operations. Nothing prevents a
+// second caller's whole read-then-swap from completing in between this
+// caller's read and its own swap. Forced deterministically (bypassing
+// scheduling luck, which needs a very specific interleaving to land
+// naturally): caller A reads currentValue=1, caller B reads
+// currentValue=2 and swaps lastSentValue 0->2 (delta 2, correct so far),
+// then A resumes and swaps lastSentValue 2->1 using its stale read -
+// returning 1-2, which underflows to 18446744073709551615, and leaving
+// lastSentValue at 1 even though the true reported value is 2. The next
+// real latch() call then double-counts the 1-unit gap this created.
+//
+// This test pins the property the fix must have: a second caller whose
+// read is already stale by the time it tries to commit must not be able
+// to commit it - it must retry against fresh state instead.
+func TestLatchDoesNotCommitStaleSwap(t *testing.T) {
+	c := &counter{}
+	atomic.StoreUint64(&c.currentValue, 1)
+
+	// Caller B: reads later (sees more), commits first.
+	atomic.StoreUint64(&c.currentValue, 2)
+	if !atomic.CompareAndSwapUint64(&c.lastSentValue, 0, 2) {
+		t.Fatal("setup: B's CAS should have succeeded against a fresh lastSentValue")
+	}
+
+	// Caller A: its read of currentValue=1 and lastSentValue=0 is now
+	// stale (B already advanced lastSentValue to 2). Committing it
+	// would regress lastSentValue backwards and corrupt the next delta.
+	if atomic.CompareAndSwapUint64(&c.lastSentValue, 0, 1) {
+		t.Fatal("A's stale attempt must not succeed against the CAS - it would regress lastSentValue")
+	}
+	if got := atomic.LoadUint64(&c.lastSentValue); got != 2 {
+		t.Errorf("lastSentValue = %d, want 2 (must never regress once advanced)", got)
+	}
+}
+
+// Concurrent writers plus concurrent latchers on the same counter, the
+// shape rejoin's forwarding path creates when multiple goroutines write
+// to a counter that's permanently detached and forwarding into another.
+// Every increment must eventually be counted exactly once.
+func TestLatchConcurrentCallersSumCorrect(t *testing.T) {
+	c := &counter{}
+
+	const writers = 4
+	const perWriter = 500000
+	var wg sync.WaitGroup
+	wg.Add(writers)
+	for g := 0; g < writers; g++ {
+		go func() {
+			defer wg.Done()
+			for i := 0; i < perWriter; i++ {
+				c.Add(1)
+			}
+		}()
+	}
+
+	stop := make(chan struct{})
+	const latchers = 4
+	var sum uint64
+	var lwg sync.WaitGroup
+	lwg.Add(latchers)
+	for g := 0; g < latchers; g++ {
+		go func() {
+			defer lwg.Done()
+			var local uint64
+			for {
+				select {
+				case <-stop:
+					atomic.AddUint64(&sum, local)
+					return
+				default:
+					local += c.latch()
+				}
+			}
+		}()
+	}
+	wg.Wait()
+	close(stop)
+	lwg.Wait()
+	atomic.AddUint64(&sum, c.latch()) // drain anything left after writers stop
+
+	want := uint64(writers * perWriter)
+	if sum != want {
+		t.Errorf("sum of latch() = %d, want %d (diff %d)", sum, want, int64(sum)-int64(want))
 	}
 }
 
@@ -905,13 +1139,30 @@ func BenchmarkStoreNewPerInstanceCounter(b *testing.B) {
 // It's small against the ~130-180 bytes the sync.Map entry and key string
 // already cost per stat (see BenchmarkStoreBytesPerStat).
 func TestCounterTimerStructSizes(t *testing.T) {
-	t.Logf("unsafe.Sizeof(counter{}) = %d bytes", unsafe.Sizeof(counter{}))
-	t.Logf("unsafe.Sizeof(timer{})   = %d bytes", unsafe.Sizeof(timer{}))
-	if got := unsafe.Sizeof(counter{}); got > 64 {
-		t.Errorf("unsafe.Sizeof(counter{}) = %d, want <= 64 (regression guard)", got)
+	counterSize := unsafe.Sizeof(counter{})
+	timerSize := unsafe.Sizeof(timer{})
+	t.Logf("unsafe.Sizeof(counter{}) = %d bytes", counterSize)
+	t.Logf("unsafe.Sizeof(timer{})   = %d bytes", timerSize)
+
+	// Exact on 64-bit platforms, where every field's natural alignment
+	// already lines up and there's no padding to vary; a loose bound
+	// would let a future field addition slip through unnoticed. Loose on
+	// other platforms since pointer/int width changes the layout and CI
+	// only targets 64-bit.
+	if strconv.IntSize == 64 {
+		if counterSize != 48 {
+			t.Errorf("unsafe.Sizeof(counter{}) = %d, want exactly 48 on a 64-bit platform", counterSize)
+		}
+		if timerSize != 48 {
+			t.Errorf("unsafe.Sizeof(timer{}) = %d, want exactly 48 on a 64-bit platform", timerSize)
+		}
+		return
 	}
-	if got := unsafe.Sizeof(timer{}); got > 64 {
-		t.Errorf("unsafe.Sizeof(timer{}) = %d, want <= 64 (regression guard)", got)
+	if counterSize > 64 {
+		t.Errorf("unsafe.Sizeof(counter{}) = %d, want <= 64 (regression guard)", counterSize)
+	}
+	if timerSize > 64 {
+		t.Errorf("unsafe.Sizeof(timer{}) = %d, want <= 64 (regression guard)", timerSize)
 	}
 }
 
