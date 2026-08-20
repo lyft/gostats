@@ -238,6 +238,10 @@ func NewDefaultStore() Store {
 type counter struct {
 	currentValue  uint64
 	lastSentValue uint64
+	// idleFlushes is the number of consecutive flushes for which this
+	// counter reported a zero delta. Reset to 0 whenever it reports a
+	// nonzero delta. Used to prune idle counters; see statStore.Flush.
+	idleFlushes uint32
 }
 
 func (c *counter) Add(delta uint64) {
@@ -302,6 +306,13 @@ type timer struct {
 	base time.Duration
 	name string
 	sink Sink
+	// active is set whenever AddValue is called and cleared by Flush; it
+	// records whether the timer was used during the last flush interval.
+	active uint32
+	// idleFlushes is the number of consecutive flushes for which this
+	// timer was not used. Reset to 0 whenever it is used. Used to prune
+	// idle timers; see statStore.Flush.
+	idleFlushes uint32
 }
 
 func (t *timer) time(dur time.Duration) {
@@ -313,6 +324,7 @@ func (t *timer) AddDuration(dur time.Duration) {
 }
 
 func (t *timer) AddValue(value float64) {
+	atomic.StoreUint32(&t.active, 1)
 	t.sink.FlushTimer(t.name, value)
 }
 
@@ -344,6 +356,12 @@ type statStore struct {
 	statGenerators []StatGenerator
 
 	sink Sink
+
+	// pruneAfterFlushes is the number of consecutive idle flushes after
+	// which a counter or timer is removed from the store. Zero (the zero
+	// value, and the default from Settings) disables pruning entirely,
+	// preserving today's unbounded-retention behavior.
+	pruneAfterFlushes uint32
 }
 
 var ReservedTagWords = map[string]bool{"asg": true, "az": true, "backend": true, "canary": true, "host": true, "period": true, "region": true, "shard": true, "window": true, "source": true, "project": true, "facet": true, "envoyservice": true}
@@ -381,12 +399,32 @@ func (s *statStore) Flush() {
 	s.mu.RUnlock()
 
 	s.counters.Range(func(key, v interface{}) bool {
+		c := v.(*counter)
 		// do not flush counters that are set to zero
-		if value := v.(*counter).latch(); value != 0 {
+		if value := c.latch(); value != 0 {
 			s.sink.FlushCounter(key.(string), value)
+			atomic.StoreUint32(&c.idleFlushes, 0)
+			return true
+		}
+		if s.pruneAfterFlushes > 0 && atomic.AddUint32(&c.idleFlushes, 1) >= s.pruneAfterFlushes {
+			s.counters.Delete(key)
 		}
 		return true
 	})
+
+	if s.pruneAfterFlushes > 0 {
+		s.timers.Range(func(key, v interface{}) bool {
+			t := v.(*timer)
+			if atomic.SwapUint32(&t.active, 0) != 0 {
+				atomic.StoreUint32(&t.idleFlushes, 0)
+				return true
+			}
+			if atomic.AddUint32(&t.idleFlushes, 1) >= s.pruneAfterFlushes {
+				s.timers.Delete(key)
+			}
+			return true
+		})
+	}
 
 	s.gauges.Range(func(key, v interface{}) bool {
 		s.sink.FlushGauge(key.(string), v.(*gauge).Value())

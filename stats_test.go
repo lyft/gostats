@@ -407,6 +407,117 @@ func TestPerInstanceStats(t *testing.T) {
 	})
 }
 
+// mapLen returns the number of entries in a sync.Map. It may return a
+// stale/incoherent count if m is modified concurrently, which is fine for
+// these single-goroutine tests.
+func mapLen(m *sync.Map) int {
+	n := 0
+	m.Range(func(_, _ interface{}) bool {
+		n++
+		return true
+	})
+	return n
+}
+
+// A counter or timer that goes unwritten for pruneAfterFlushes consecutive
+// flushes is removed from the store to bound memory growth from
+// high-cardinality tags (see settings.go: GOSTATS_PRUNE_IDLE_SECONDS).
+func TestStatsStorePruneIdleCounters(t *testing.T) {
+	sink := mock.NewSink()
+	const threshold = 3
+	s := &statStore{sink: sink, pruneAfterFlushes: threshold}
+
+	const n = 8
+	for i := 0; i < n; i++ {
+		s.NewCounter("counter_" + strconv.Itoa(i))
+	}
+	if got := mapLen(&s.counters); got != n {
+		t.Fatalf("len(counters) = %d, want %d", got, n)
+	}
+
+	// Never written after creation, so every flush counts as idle. The
+	// first threshold-1 flushes must not prune.
+	for i := 0; i < threshold-1; i++ {
+		s.Flush()
+		if got := mapLen(&s.counters); got != n {
+			t.Fatalf("after flush %d/%d: len(counters) = %d, want %d (not yet pruned)", i+1, threshold, got, n)
+		}
+	}
+	// The threshold-th idle flush prunes.
+	s.Flush()
+	if got := mapLen(&s.counters); got != 0 {
+		t.Fatalf("after flush %d: len(counters) = %d, want 0 (pruned)", threshold, got)
+	}
+}
+
+func TestStatsStorePruneIdleTimers(t *testing.T) {
+	sink := mock.NewSink()
+	const threshold = 3
+	s := &statStore{sink: sink, pruneAfterFlushes: threshold}
+
+	const n = 8
+	for i := 0; i < n; i++ {
+		s.NewTimer("timer_" + strconv.Itoa(i))
+	}
+	if got := mapLen(&s.timers); got != n {
+		t.Fatalf("len(timers) = %d, want %d", got, n)
+	}
+
+	for i := 0; i < threshold-1; i++ {
+		s.Flush()
+		if got := mapLen(&s.timers); got != n {
+			t.Fatalf("after flush %d/%d: len(timers) = %d, want %d (not yet pruned)", i+1, threshold, got, n)
+		}
+	}
+	s.Flush()
+	if got := mapLen(&s.timers); got != 0 {
+		t.Fatalf("after flush %d: len(timers) = %d, want 0 (pruned)", threshold, got)
+	}
+}
+
+// A counter or timer written at least once every pruneAfterFlushes flushes
+// must never be pruned.
+func TestStatsStorePruneSkipsActiveMetrics(t *testing.T) {
+	sink := mock.NewSink()
+	const threshold = 3
+	s := &statStore{sink: sink, pruneAfterFlushes: threshold}
+
+	c := s.NewCounter("active_counter")
+	tm := s.NewTimer("active_timer")
+
+	for i := 0; i < threshold*3; i++ {
+		c.Inc()
+		tm.AddValue(1)
+		s.Flush()
+	}
+	if got := mapLen(&s.counters); got != 1 {
+		t.Errorf("len(counters) = %d, want 1 (active counter must survive)", got)
+	}
+	if got := mapLen(&s.timers); got != 1 {
+		t.Errorf("len(timers) = %d, want 1 (active timer must survive)", got)
+	}
+}
+
+// Pruning is opt-in: the zero-value statStore{} (pruneAfterFlushes == 0)
+// must never prune, matching today's unbounded behavior exactly.
+func TestStatsStorePruneDisabledByDefault(t *testing.T) {
+	sink := mock.NewSink()
+	s := &statStore{sink: sink} // pruneAfterFlushes zero value: disabled
+
+	s.NewCounter("foo")
+	s.NewTimer("bar")
+
+	for i := 0; i < 50; i++ {
+		s.Flush()
+	}
+	if got := mapLen(&s.counters); got != 1 {
+		t.Errorf("len(counters) = %d, want 1 (pruning disabled)", got)
+	}
+	if got := mapLen(&s.timers); got != 1 {
+		t.Errorf("len(timers) = %d, want 1 (pruning disabled)", got)
+	}
+}
+
 func BenchmarkStore_MutexContention(b *testing.B) {
 	s := NewStore(nullSink{}, false)
 	t := time.NewTicker(500 * time.Microsecond) // we want flush to contend with accessing metrics
