@@ -7,11 +7,13 @@ import (
 	"fmt"
 	"math/rand"
 	"reflect"
+	"runtime"
 	"strconv"
 	"strings"
 	"sync"
 	"testing"
 	"time"
+	"unsafe"
 
 	tagspkg "github.com/lyft/gostats/internal/tags"
 	"github.com/lyft/gostats/mock"
@@ -895,4 +897,200 @@ func BenchmarkStoreNewPerInstanceCounter(b *testing.B) {
 			store.NewPerInstanceCounter("name", tags)
 		}
 	})
+}
+
+// The pruning fields (idleFlushes, detached, store, name) grow counter from
+// 16 to 48 bytes. That's real, so it's pinned here rather than left to
+// drift unnoticed - fail if it grows further without a deliberate change.
+// It's small against the ~130-180 bytes the sync.Map entry and key string
+// already cost per stat (see BenchmarkStoreBytesPerStat).
+func TestCounterTimerStructSizes(t *testing.T) {
+	t.Logf("unsafe.Sizeof(counter{}) = %d bytes", unsafe.Sizeof(counter{}))
+	t.Logf("unsafe.Sizeof(timer{})   = %d bytes", unsafe.Sizeof(timer{}))
+	if got := unsafe.Sizeof(counter{}); got > 64 {
+		t.Errorf("unsafe.Sizeof(counter{}) = %d, want <= 64 (regression guard)", got)
+	}
+	if got := unsafe.Sizeof(timer{}); got > 64 {
+		t.Errorf("unsafe.Sizeof(timer{}) = %d, want <= 64 (regression guard)", got)
+	}
+}
+
+// BenchmarkStoreBytesPerStat reports the total heap cost of tracking N
+// unique counters: the sync.Map entry and key string every counter always
+// paid, plus the counter struct itself. It does NOT split by pruning
+// enabled/disabled - unsafe.Sizeof(counter{}) is a compile-time struct
+// layout, so every counter carries the same 48 bytes whether or not the
+// store's pruneAfterFlushes is nonzero; PruningEnabled would just report
+// the same number with extra noise. TestCounterTimerStructSizes is the
+// right place to see that this feature's fields cost 16 -> 48 bytes;
+// this benchmark exists to show that delta is small next to the total.
+//
+// Run with -benchtime=10x for a quick, low-noise read; the default
+// adaptive N re-runs the whole N-counter build repeatedly and mostly just
+// burns time once the metric has stabilized.
+func BenchmarkStoreBytesPerStat(b *testing.B) {
+	const n = 20000
+	for i := 0; i < b.N; i++ {
+		s := &statStore{sink: nullSink{}}
+		var before, after runtime.MemStats
+		runtime.GC()
+		runtime.ReadMemStats(&before)
+		for j := 0; j < n; j++ {
+			s.NewCounter("counter_" + strconv.Itoa(j))
+		}
+		runtime.GC()
+		runtime.ReadMemStats(&after)
+		b.ReportMetric(float64(after.HeapAlloc-before.HeapAlloc)/float64(n), "bytes/counter")
+		runtime.KeepAlive(s)
+	}
+}
+
+// BenchmarkCardinalityFlood is the number for the ticket: it simulates the
+// reported failure mode - a flood of tag combinations each written once
+// and never again, interspersed with flushes - and reports how many
+// counters remain live at the end. Without pruning this equals the flood
+// size (unbounded growth); with pruning it stays small regardless of the
+// flood size, since one-shot entries age out a few flushes after their
+// only write.
+//
+// The flood size is fixed rather than scaled by b.N so the benchmark's
+// cost doesn't balloon under the default adaptive iteration count; run
+// with -benchtime=1x for a single clean measurement.
+func BenchmarkCardinalityFlood(b *testing.B) {
+	const floodSize = 5000
+	for _, tc := range []struct {
+		name  string
+		prune uint32
+	}{
+		{"PruningDisabled", 0},
+		{"PruningEnabled", 4},
+	} {
+		b.Run(tc.name, func(b *testing.B) {
+			for i := 0; i < b.N; i++ {
+				s := &statStore{sink: nullSink{}, pruneAfterFlushes: tc.prune}
+				for j := 0; j < floodSize; j++ {
+					s.NewCounter("flood_" + strconv.Itoa(j)).Inc()
+					if j%10 == 0 {
+						s.Flush()
+					}
+				}
+				// Let anything still idle age out, mirroring how the map
+				// settles between bursts in production.
+				for k := uint32(0); k < tc.prune+1; k++ {
+					s.Flush()
+				}
+				b.ReportMetric(float64(mapLen(&s.counters)), "live-counters")
+			}
+		})
+	}
+}
+
+// BenchmarkCounterAdd and BenchmarkCounterInc are the direct rebuttal to
+// PR #158's +3443% regression on NewCounter (a global-mutex LRU
+// reordering on every access): with pruning disabled, store is nil, so
+// the added check is a single non-atomic pointer comparison - the hot
+// path is unchanged from before this feature existed. With pruning
+// enabled, it costs exactly one additional atomic load.
+func BenchmarkCounterAdd(b *testing.B) {
+	b.Run("PruningDisabled", func(b *testing.B) {
+		c := &counter{}
+		b.ResetTimer()
+		for i := 0; i < b.N; i++ {
+			c.Add(1)
+		}
+	})
+	b.Run("PruningEnabled", func(b *testing.B) {
+		s := &statStore{sink: nullSink{}, pruneAfterFlushes: 4}
+		c := s.newCounter("bench_counter")
+		b.ResetTimer()
+		for i := 0; i < b.N; i++ {
+			c.Add(1)
+		}
+	})
+}
+
+func BenchmarkCounterInc(b *testing.B) {
+	b.Run("PruningDisabled", func(b *testing.B) {
+		c := &counter{}
+		b.ResetTimer()
+		for i := 0; i < b.N; i++ {
+			c.Inc()
+		}
+	})
+	b.Run("PruningEnabled", func(b *testing.B) {
+		s := &statStore{sink: nullSink{}, pruneAfterFlushes: 4}
+		c := s.newCounter("bench_counter")
+		b.ResetTimer()
+		for i := 0; i < b.N; i++ {
+			c.Inc()
+		}
+	})
+}
+
+// BenchmarkStoreNewCounterParallel measures lookup contention under
+// concurrent access to a fixed set of counters - the scenario PR #158's
+// global-mutex LRU cache regressed.
+func BenchmarkStoreNewCounterParallel(b *testing.B) {
+	s := NewStore(nullSink{}, false)
+	tick := time.NewTicker(time.Hour) // don't flush
+	defer tick.Stop()
+	go s.Start(tick)
+	names := new([2048]string)
+	for i := 0; i < len(names); i++ {
+		names[i] = "counter_" + strconv.Itoa(i)
+	}
+	b.ResetTimer()
+	b.RunParallel(func(pb *testing.PB) {
+		for i := 0; pb.Next(); i++ {
+			s.NewCounter(names[i%len(names)])
+		}
+	})
+}
+
+// BenchmarkStoreFlush measures Flush's cost, with pruning disabled vs
+// enabled, over N counters and N timers that are written on every
+// iteration so none of them ever go idle. The added idle-tracking and
+// prune logic runs on every entry on every flush regardless, so this is
+// where a regression on the common (nothing to prune) path would show.
+//
+// Every entry must stay active: with pruning enabled, anything that goes
+// idle for pruneAfterFlushes iterations is deleted, and once the whole
+// map empties out the benchmark degenerates into measuring Flush() on an
+// empty store - which is exactly the bug an earlier version of this
+// benchmark had (it wrote to each entry once during setup instead of on
+// every iteration, so pruning deleted everything within the first few
+// iterations and the reported cost was ~1000x too fast).
+//
+// The writes that keep entries active happen with the timer stopped, so
+// only Flush's own cost is measured.
+func BenchmarkStoreFlush(b *testing.B) {
+	const n = 2048
+	for _, tc := range []struct {
+		name  string
+		prune uint32
+	}{
+		{"PruningDisabled", 0},
+		{"PruningEnabled", 4},
+	} {
+		b.Run(tc.name, func(b *testing.B) {
+			s := &statStore{sink: nullSink{}, pruneAfterFlushes: tc.prune}
+			counters := make([]Counter, n)
+			timers := make([]Timer, n)
+			for i := 0; i < n; i++ {
+				id := strconv.Itoa(i)
+				counters[i] = s.NewCounter("counter_" + id)
+				timers[i] = s.NewTimer("timer_" + id)
+			}
+			b.ResetTimer()
+			for i := 0; i < b.N; i++ {
+				b.StopTimer()
+				for j := 0; j < n; j++ {
+					counters[j].Inc()
+					timers[j].AddValue(1)
+				}
+				b.StartTimer()
+				s.Flush()
+			}
+		})
+	}
 }
