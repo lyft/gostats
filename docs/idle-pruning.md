@@ -32,5 +32,5 @@ The seconds value is converted to a number of flushes using your configured flus
 ticker at a different period, pruning follows that many of your own flushes, not
 `GOSTATS_PRUNE_IDLE_SECONDS` of wall-clock time.
 
-`gostats` doesn't emit any metrics about pruning itself. Watch your service's own memory metrics -
-the way you noticed the growth in the first place - to confirm pruning is keeping it bounded.
+`gostats` doesn't emit any metrics about pruning itself. Watch your service's own memory metrics to
+confirm pruning is keeping it bounded.
