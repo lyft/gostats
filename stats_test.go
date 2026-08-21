@@ -869,10 +869,13 @@ func TestStatsStoreNoTrackedMetricsWithoutPruning(t *testing.T) {
 // Every future write on that held reference was silently dropped forever.
 //
 // Fixed by never clearing detached from rejoin(): only Flush's own
-// active branch does, and only at a point where it has just confirmed,
-// via that same Range callback, that the counter is currently in the
-// map. See the comments on counter.rejoin and the active branch of
-// statStore.Flush's counters.Range.
+// active branch does. See the comment on counter.rejoin.
+//
+// This covers a write racing Flush. A second, distinct orphan hazard -
+// Flush racing itself, via two concurrent Flush() calls - is covered
+// separately by TestConcurrentFlushesDoNotOrphanCounter; statStore.flushMu
+// is what closes that one (see its comment for why a lock-free,
+// generation-counter version of this same flag was tried and dropped).
 func TestPrunedCounterIntermittentWriteNeverOrphans(t *testing.T) {
 	sink := mock.NewSink()
 	const threshold = 1
@@ -1015,6 +1018,79 @@ func TestLatchConcurrentCallersSumCorrect(t *testing.T) {
 	want := uint64(writers * perWriter)
 	if sum != want {
 		t.Errorf("sum of latch() = %d, want %d (diff %d)", sum, want, int64(sum)-int64(want))
+	}
+}
+
+// Two concurrent Flush() calls can reopen the same class of orphan the
+// rejoin fix closed, via the clear at the top of counters.Range: F1 sees
+// a nonzero latch, flushes it, and is about to clear detached - based on
+// having "just confirmed" via its own Range callback that c is in the
+// map. That confirmation is stale by the time the clear actually
+// executes if F2 (a second, fully independent Flush() call visiting the
+// same key) deletes and re-detaches c in the gap. F1 then resumes and
+// clobbers F2's detached=1 back to 0 while c sits outside the map -
+// exactly the orphan state, just reached through Flush racing itself
+// instead of a write racing Flush.
+//
+// Closed by statStore.flushMu, which serializes Flush() calls so F1 and
+// F2 can no longer be "concurrent" in the sense this bug needs. Before
+// that fix landed, this test failed reliably (see flushMu's comment for
+// what was tried first and why it wasn't enough); it stays as a
+// regression guard for this specific failure mode, deterministic now
+// rather than probabilistic.
+//
+// This is realistic, not contrived: Store's own doc comment says "The
+// store will flush either at the regular interval, or whenever Flush()
+// is called" - a ticker-driven Start goroutine plus a manual Flush() call
+// from elsewhere is exactly this shape.
+func TestConcurrentFlushesDoNotOrphanCounter(t *testing.T) {
+	sink := mock.NewSink()
+	const threshold = 1
+	s := &statStore{sink: sink, pruneAfterFlushes: threshold}
+
+	c := s.NewCounter("racing-flushers")
+
+	const writes = 300
+	writesDone := make(chan struct{})
+	go func() {
+		defer close(writesDone)
+		for i := 0; i < writes; i++ {
+			c.Inc()
+			time.Sleep(20 * time.Microsecond)
+		}
+	}()
+
+	stop := make(chan struct{})
+	var flushersWg sync.WaitGroup
+	const flushers = 4
+	flushersWg.Add(flushers)
+	for i := 0; i < flushers; i++ {
+		go func() {
+			defer flushersWg.Done()
+			for {
+				select {
+				case <-stop:
+					return
+				default:
+					s.Flush()
+				}
+			}
+		}()
+	}
+
+	<-writesDone
+	close(stop)
+	flushersWg.Wait()
+
+	// Deterministic drain: if c is currently detached, this Inc()
+	// reattaches it (nothing else ever looks up this name), and the
+	// following Flush reports the total.
+	c.Inc()
+	s.Flush()
+
+	want := uint64(writes + 1)
+	if got, ok := sink.LoadCounter("racing-flushers"); !ok || got != want {
+		t.Errorf("LoadCounter(%q) = (%d, %v), want (%d, true)", "racing-flushers", got, ok, want)
 	}
 }
 

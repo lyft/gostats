@@ -283,6 +283,13 @@ type counter struct {
 	// detached is set when statStore.Flush removes this counter from the
 	// store for being idle. A subsequent write reattaches it (see
 	// maybeRejoin/rejoin) so a reference held past pruning keeps working.
+	//
+	// Only Flush's active branch ever clears it, and that is only safe
+	// because statStore.flushMu serializes Flush() calls against each
+	// other - see flushMu's comment for why a second, concurrent Flush()
+	// call made a plain boolean here unsafe during development, and why
+	// the fix is a mutex around the infrequent Flush() call rather than
+	// a lock-free scheme for this flag.
 	detached uint32
 	// store and name are set at creation only when pruning is enabled
 	// (store == nil otherwise), so maybeRejoin is a single pointer
@@ -321,11 +328,12 @@ func (c *counter) maybeRejoin() {
 // it has just confirmed, via that same Range callback, that c is
 // currently and genuinely present in the map. If rejoin cleared it here
 // instead, based on this LoadOrStore having (at some point in the past)
-// found or made c the map's occupant, a concurrent Flush could delete and
-// re-detach c in the gap between that observation and the clear - c would
-// then sit outside the map with detached == 0, and maybeRejoin would
-// never fire again: a permanent orphan. Not touching the flag here closes
-// that window entirely rather than narrowing it.
+// found or made c the map's occupant, a concurrent write could observe c
+// still present, conclude it's already attached, and then have Flush
+// delete it anyway right after - c would sit outside the map with
+// detached == 0, and maybeRejoin would never fire again: a permanent
+// orphan. Not touching the flag here closes that window entirely rather
+// than narrowing it.
 func (c *counter) rejoin() {
 	v, loaded := c.store.counters.LoadOrStore(c.name, c)
 	if !loaded {
@@ -465,6 +473,35 @@ type statStore struct {
 
 	sink Sink
 
+	// flushMu serializes Flush() calls against each other. Store's own
+	// doc comment permits calling Flush both periodically (via
+	// Start/StartContext's own goroutine) and on demand ("the store will
+	// flush either at the regular interval, or whenever Flush() is
+	// called"), so two calls can genuinely run concurrently.
+	//
+	// The pruning logic below depends on that not happening. An earlier,
+	// lock-free version used a generation counter (odd/even + CAS) so a
+	// Flush call could tell whether a counter had been re-pruned since it
+	// last looked, rather than a single flushMu. It was dropped after
+	// three rounds of fixing a race, verifying empirically, and finding
+	// the fix had only narrowed the window rather than closed it: winning
+	// a CAS, or re-verifying right before a map delete, both still leave
+	// a gap - however small - between "check" and "act" that Go's
+	// scheduler can land a full, legitimate reattachment cycle inside,
+	// because sync.Map has no primitive for "delete this key, but only if
+	// some unrelated field on the value still holds a specific number".
+	// Each fix for that produced a test failure at a lower rate, not zero,
+	// under TestConcurrentFlushesDoNotOrphanCounter.
+	//
+	// Flush runs periodically (typically every 5-10s), not on the hot
+	// Add()/Inc()/Set() path this feature is designed to leave lock-free
+	// (see counter.detached and store/name on counter), so a mutex here -
+	// and only here - trades a cost that does not exist in the common
+	// case (a single ticker-driven Start goroutine never contends this
+	// lock at all) for a provable guarantee, rather than continuing to
+	// chase a lock-free version with no evidence it terminates.
+	flushMu sync.Mutex
+
 	// pruneAfterFlushes is the number of consecutive idle flushes after
 	// which a counter or timer is removed from the store. Zero (the zero
 	// value, and the default from Settings) disables pruning entirely,
@@ -526,6 +563,9 @@ const (
 )
 
 func (s *statStore) Flush() {
+	s.flushMu.Lock()
+	defer s.flushMu.Unlock()
+
 	s.mu.RLock()
 	for _, g := range s.statGenerators {
 		g.GenerateStats()
@@ -539,10 +579,13 @@ func (s *statStore) Flush() {
 		if value := c.latch(); value != 0 {
 			s.sink.FlushCounter(key.(string), value)
 			atomic.StoreUint32(&c.idleFlushes, 0)
-			// The only place detached is ever cleared: right here, having
-			// just confirmed via this Range callback that c is currently
-			// in the map. See the comment on rejoin for why clearing it
-			// from a write's rejoin() instead would be unsafe.
+			// The only place detached is ever cleared: right here,
+			// having just confirmed via this Range callback that c is
+			// currently in the map. Safe only because flushMu means no
+			// other Flush() call can be doing the same thing
+			// concurrently - see flushMu's comment. See the comment on
+			// rejoin for why clearing it from a write's rejoin() instead
+			// would be unsafe regardless of that.
 			atomic.StoreUint32(&c.detached, 0)
 			liveCounters++
 			return true
