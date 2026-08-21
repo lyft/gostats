@@ -26,10 +26,10 @@ import "github.com/lyft/gostats"
 ## Bounding memory from high-cardinality tags
 
 By default, `gostats` never forgets a counter or timer name once it sees one, even after the value
-stops changing. Don't tag one with something that varies per request - a user ID, a request ID,
-anything effectively unbounded: that grows memory without limit. `GOSTATS_PRUNE_IDLE_SECONDS` bounds
-the damage if that happens anyway. See [docs/idle-pruning.md](docs/idle-pruning.md) for how it
-works, how to pick a value, and the metrics it emits.
+stops changing. Don't tag one with a high-cardinality value: that grows memory without limit.
+`GOSTATS_PRUNE_IDLE_SECONDS` bounds the damage if that happens anyway. See
+[docs/idle-pruning.md](docs/idle-pruning.md) for how it works, how to pick a value, and the metrics
+it emits.
 
 ## Mocking
 

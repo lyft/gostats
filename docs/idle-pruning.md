@@ -1,23 +1,24 @@
 # Bounding memory from high-cardinality tags
 
 By default, `gostats` never forgets a counter or timer name once it sees one, even after the value
-stops changing. Don't tag one with something that varies per request - a user ID, a request ID,
-anything effectively unbounded: that grows memory without limit.
+stops changing. Don't tag one with a high-cardinality value: that grows memory without limit.
 
 Set `GOSTATS_PRUNE_IDLE_SECONDS` to prune counters and timers that have gone that many seconds
 without changing value. (A write that doesn't change the value - `Add(0)`, or `Set` with the value
 it already holds - counts as idle, same as no write at all.) It is unset (disabled) by default, so
 existing behavior does not change unless you opt in.
 
-Pick a value comfortably longer than the slowest-firing counter or timer you still care about. One
-that legitimately fires less often than `GOSTATS_PRUNE_IDLE_SECONDS` will still work correctly, but
-each time it goes idle that long it gets pruned and then has to reattach on its next write, delaying
-that one report by up to a flush interval.
-
-For example, to prune anything idle for more than a minute:
+Pick a value comfortably longer than the slowest-firing counter or timer you still care about, not
+a value that matches how long a leak takes to become noticeable - those are unrelated. A shorter
+value bounds runaway cardinality more tightly, since each stale entry is reclaimed sooner regardless
+of how long the underlying leak runs; the cost is more churn on any of your own counters or timers
+that legitimately go quiet for stretches longer than the value you pick (each cycles through
+prune-then-reattach, delaying that one report by up to a flush interval, though nothing is lost -
+see below). If you haven't audited how infrequently your own stats can legitimately fire, err
+longer:
 
 ```sh
-export GOSTATS_PRUNE_IDLE_SECONDS=60
+export GOSTATS_PRUNE_IDLE_SECONDS=600  # prune anything idle for more than 10 minutes
 ```
 
 A pruned entry is not gone for good. If your code holds a `Counter` or `Timer` in a struct field -
