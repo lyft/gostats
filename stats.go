@@ -554,21 +554,6 @@ func (s *statStore) Start(ticker *time.Ticker) {
 	s.StartContext(context.Background(), ticker)
 }
 
-// Internal observability for the pruning mechanism above, both gated
-// behind pruning being enabled (see the "if s.pruneAfterFlushes > 0"
-// block in Flush below) - emitting them unconditionally would add three
-// gauge series to every store's wire output, including stores that never
-// opt in, and breaks tests that assert exact sink output. gostats.tracked
-// reports live map sizes; gostats.pruned reports eviction counts, for
-// alerting on churn once pruning is enabled.
-const (
-	trackedCountersName = "gostats.tracked.__type=counter"
-	trackedGaugesName   = "gostats.tracked.__type=gauge"
-	trackedTimersName   = "gostats.tracked.__type=timer"
-	prunedCountersName  = "gostats.pruned.__type=counter"
-	prunedTimersName    = "gostats.pruned.__type=timer"
-)
-
 func (s *statStore) Flush() {
 	s.flushMu.Lock()
 	defer s.flushMu.Unlock()
@@ -579,7 +564,6 @@ func (s *statStore) Flush() {
 	}
 	s.mu.RUnlock()
 
-	var liveCounters, prunedCounters int64
 	s.counters.Range(func(key, v interface{}) bool {
 		c := v.(*counter)
 		// do not flush counters that are set to zero
@@ -594,11 +578,9 @@ func (s *statStore) Flush() {
 			// rejoin for why clearing it from a write's rejoin() instead
 			// would be unsafe regardless of that.
 			atomic.StoreUint32(&c.detached, 0)
-			liveCounters++
 			return true
 		}
 		if s.pruneAfterFlushes == 0 || atomic.AddUint32(&c.idleFlushes, 1) < s.pruneAfterFlushes {
-			liveCounters++
 			return true
 		}
 		// Delete before marking detached. Not load-bearing for
@@ -615,53 +597,27 @@ func (s *statStore) Flush() {
 			s.sink.FlushCounter(key.(string), v)
 			atomic.StoreUint32(&c.idleFlushes, 0)
 			c.rejoin()
-			liveCounters++
-		} else {
-			prunedCounters++
 		}
 		return true
 	})
 
-	var liveTimers, prunedTimers int64
 	s.timers.Range(func(key, v interface{}) bool {
 		t := v.(*timer)
 		if atomic.SwapUint32(&t.active, 0) != 0 {
 			atomic.StoreUint32(&t.idleFlushes, 0)
-			liveTimers++
 			return true
 		}
 		if s.pruneAfterFlushes == 0 || atomic.AddUint32(&t.idleFlushes, 1) < s.pruneAfterFlushes {
-			liveTimers++
 			return true
 		}
 		s.timers.Delete(key)
-		prunedTimers++
 		return true
 	})
 
-	var liveGauges int64
 	s.gauges.Range(func(key, v interface{}) bool {
 		s.sink.FlushGauge(key.(string), v.(*gauge).Value())
-		liveGauges++
 		return true
 	})
-
-	// Gated behind pruning being enabled: emitting these unconditionally
-	// would add three new gauge series to the wire output of every store
-	// in the fleet, including the vast majority that never opt in. The
-	// ticket's ask is for evictions to be observable, which only applies
-	// once eviction is happening at all.
-	if s.pruneAfterFlushes > 0 {
-		s.sink.FlushGauge(trackedCountersName, uint64(liveCounters))
-		s.sink.FlushGauge(trackedGaugesName, uint64(liveGauges))
-		s.sink.FlushGauge(trackedTimersName, uint64(liveTimers))
-		if prunedCounters != 0 {
-			s.sink.FlushCounter(prunedCountersName, uint64(prunedCounters))
-		}
-		if prunedTimers != 0 {
-			s.sink.FlushCounter(prunedTimersName, uint64(prunedTimers))
-		}
-	}
 
 	flushableSink, ok := s.sink.(FlushableSink)
 	if ok {

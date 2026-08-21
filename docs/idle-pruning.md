@@ -32,17 +32,5 @@ The seconds value is converted to a number of flushes using your configured flus
 ticker at a different period, pruning follows that many of your own flushes, not
 `GOSTATS_PRUNE_IDLE_SECONDS` of wall-clock time.
 
-Once enabled, two metrics are emitted (silent otherwise, so turning pruning on is what turns the
-visibility on too):
-
-* `gostats.tracked`, tagged `type=counter|gauge|timer` - how many of each are currently held.
-  Alert on this climbing without leveling off: that means something is generating unique tag
-  values faster than they go idle.
-* `gostats.pruned`, tagged `type=counter|timer` - how many were removed on a given flush. A
-  sustained high rate means high-cardinality tags are actively being generated and pruned away -
-  the leak is contained, but the tag usage generating it is still worth fixing at the source.
-
-Being gated on pruning means `gostats.tracked` can't tell you whether to turn pruning on in the
-first place - only a service that already suspects a cardinality problem and has opted in gets to
-watch it. Finding that problem before opting in is still a job for your metrics backend's own
-cardinality tooling.
+`gostats` doesn't emit any metrics about pruning itself. Watch your service's own memory metrics -
+the way you noticed the growth in the first place - to confirm pruning is keeping it bounded.
