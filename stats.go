@@ -40,6 +40,13 @@ type Store interface {
 	//  GenerateStats()
 	// on all of its stat generators,
 	// and flush all the Counters and Gauges registered with it.
+	//
+	// Safe to call from multiple goroutines; concurrent calls are
+	// serialized, so a manual call can block behind a slow one already
+	// running, including the Sink's own flush if that blocks on I/O. Do
+	// not call Flush from a StatGenerator or a Sink's Flush method - this
+	// deadlocks rather than the unbounded recursion calling it from
+	// GenerateStats used to cause.
 	Flush()
 
 	// Start a timer for periodic stat flushes. This is a blocking
