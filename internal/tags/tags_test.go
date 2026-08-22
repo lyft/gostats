@@ -80,7 +80,6 @@ func TestSerializeTagsReference(t *testing.T) {
 func TestSerializeTagsNetworkSort(t *testing.T) {
 	const name = "prefix"
 
-	rand.Seed(time.Now().UnixNano())
 	seen := make(map[string]bool)
 
 	randString := func() string {
