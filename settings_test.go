@@ -116,6 +116,7 @@ func TestSettingsErrors(t *testing.T) {
 		"STATSD_PORT":                    "not-an-int",
 		"GOSTATS_FLUSH_INTERVAL_SECONDS": "true",
 		"GOSTATS_LOGGING_SINK_DISABLED":  "1337",
+		"GOSTATS_PRUNE_IDLE_SECONDS":     "not-an-int",
 	}
 	for key, val := range tests {
 		t.Run(key, func(t *testing.T) {
@@ -132,6 +133,27 @@ func TestSettingsErrors(t *testing.T) {
 				t.Errorf("Settings expected a panic for invalid value %s=%s", key, val)
 			}
 		})
+	}
+}
+
+func TestSettingsPruneIdleSecondsDefault(t *testing.T) {
+	reset := testSetenv(t, "GOSTATS_PRUNE_IDLE_SECONDS", "")
+	defer reset()
+	settings := GetSettings()
+	if settings.PruneIdleSeconds != DefaultPruneIdleSeconds {
+		t.Errorf("PruneIdleSeconds: want: %d got: %d", DefaultPruneIdleSeconds, settings.PruneIdleSeconds)
+	}
+	if settings.PruneIdleSeconds != 0 {
+		t.Errorf("PruneIdleSeconds default: want: 0 (disabled) got: %d", settings.PruneIdleSeconds)
+	}
+}
+
+func TestSettingsPruneIdleSecondsOverride(t *testing.T) {
+	reset := testSetenv(t, "GOSTATS_PRUNE_IDLE_SECONDS", "60")
+	defer reset()
+	settings := GetSettings()
+	if settings.PruneIdleSeconds != 60 {
+		t.Errorf("PruneIdleSeconds: want: 60 got: %d", settings.PruneIdleSeconds)
 	}
 }
 

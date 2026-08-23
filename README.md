@@ -23,6 +23,13 @@ import "github.com/lyft/gostats"
 ```
 
 
+## Bounding memory from high-cardinality tags
+
+By default, `gostats` never forgets a counter or timer name once it sees one, even after the value
+stops changing. Don't tag one with a high-cardinality value: that grows memory without limit.
+`GOSTATS_PRUNE_IDLE_SECONDS` limits the growth. See
+[docs/idle-pruning.md](docs/idle-pruning.md) for how it works and how to pick a value.
+
 ## Mocking
 
 A thread-safe mock sink is provided by the [gostats/mock](https://github.com/lyft/gostats/blob/mock-sink/mock/sink.go) package.  The mock sink also provides methods that are useful for testing (as demonstrated below).
