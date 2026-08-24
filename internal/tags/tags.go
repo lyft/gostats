@@ -450,6 +450,54 @@ func SerializeTags(name string, tags map[string]string) string {
 	}
 }
 
+const (
+	fnvOffset64a = 14695981039346656037
+	fnvOffset64b = 0x27220a5774762123 // an arbitrary, independent offset basis
+	fnvPrime64   = 1099511628211
+)
+
+// hashString folds s into the running FNV-1a hash h.
+func hashString(h uint64, s string) uint64 {
+	for i := 0; i < len(s); i++ {
+		h ^= uint64(s[i])
+		h *= fnvPrime64
+	}
+	return h
+}
+
+// HashNameTags128 returns a 128-bit (as two independent uint64 halves),
+// order-independent hash of name and tags, suitable as a memoization cache
+// key: equal (name, tags) pairs hash to the same value regardless of the
+// tags map's iteration order. Unlike Serialize, it never allocates and
+// doesn't require the tags to be sorted.
+//
+// At 128 bits, two different (name, tags) pairs colliding is negligible for
+// any realistic number of distinct metrics (the birthday bound is n²/2^129,
+// which stays negligible even at cardinalities far beyond what a real
+// service would produce) - so callers may treat a match on both halves as
+// authoritative without also retaining a copy of the original name/tags to
+// confirm it, which matters for a cache that (like scopeCache) never evicts.
+func HashNameTags128(name string, tags map[string]string) (hi, lo uint64) {
+	hi = hashString(fnvOffset64a, name)
+	lo = hashString(fnvOffset64b, name)
+	var chi, clo uint64
+	for k, v := range tags {
+		if k == "" || v == "" {
+			continue
+		}
+		ph := hashString(fnvOffset64a, k)
+		ph = hashString(ph, "=")
+		ph = hashString(ph, v)
+		chi ^= ph // order-independent: XOR doesn't care what order pairs arrive in
+
+		pl := hashString(fnvOffset64b, k)
+		pl = hashString(pl, "=")
+		pl = hashString(pl, v)
+		clo ^= pl
+	}
+	return hi ^ chi, lo ^ clo
+}
+
 // ReplaceChars replaces any invalid chars ([.:|]) in value s with '_'.
 func ReplaceChars(s string) string {
 	var buf []byte // lazily allocated
