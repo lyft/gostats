@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/kelseyhightower/envconfig"
+	"github.com/spf13/viper"
 )
 
 func testSetenv(t *testing.T, pairs ...string) (reset func()) {
@@ -50,7 +50,16 @@ func TestSettingsCompat(t *testing.T) {
 	defer reset()
 
 	var e Settings
-	if err := envconfig.Process("", &e); err != nil {
+	viper.SetDefault("USE_STATSD", DefaultUseStatsd)
+	viper.SetDefault("STATSD_HOST", DefaultStatsdHost)
+	viper.SetDefault("STATSD_PROTOCOL", DefaultStatsdProtocol)
+	viper.SetDefault("STATSD_PORT", DefaultStatsdPort)
+	viper.SetDefault("GOSTATS_FLUSH_INTERVAL_SECONDS", DefaultFlushIntervalS)
+	viper.SetDefault("GOSTATS_LOGGING_SINK_DISABLED", DefaultLoggingSinkDisabled)
+
+	viper.AutomaticEnv()
+
+	if err := viper.Unmarshal(&e); err != nil {
 		t.Fatal(err)
 	}
 
