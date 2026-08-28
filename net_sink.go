@@ -272,6 +272,36 @@ func (s *netSink) FlushTimer(name string, value float64) {
 	}
 }
 
+func (s *netSink) FlushSampledTimer(name string, value, sampleRate float64) {
+	timerSuffix := "|ms"
+	sampleSuffix := "|@"
+	metricSuffix := "\n"
+
+	// todo: see if we can dedup code here without the expense of efficiency
+	var writeValue func(*buffer)
+	if 0 <= value && value < math.MaxUint64 && math.Trunc(value) == value {
+		writeValue = func(b *buffer) { b.WriteUnit64(uint64(value)) }
+	} else {
+		writeValue = func(b *buffer) { b.WriteFloat64(value) }
+	}
+
+	b := pbFree.Get().(*buffer)
+
+	b.WriteString(name)
+	b.WriteChar(':')
+	writeValue(b)
+	b.WriteString(timerSuffix)
+
+	b.WriteString(sampleSuffix)
+	b.writeFloat64WithPrecision(sampleRate, 2) // todo: deteremine how many decimal places we need
+	b.WriteString(metricSuffix)
+
+	s.writeBuffer(b)
+
+	b.Reset()
+	pbFree.Put(b)
+}
+
 func (s *netSink) run() {
 	addr := net.JoinHostPort(s.conf.StatsdHost, strconv.Itoa(s.conf.StatsdPort))
 
@@ -417,5 +447,9 @@ func (b *buffer) WriteUnit64(val uint64) {
 }
 
 func (b *buffer) WriteFloat64(val float64) {
-	*b = strconv.AppendFloat(*b, val, 'f', 6, 64)
+	b.writeFloat64WithPrecision(val, 6)
+}
+
+func (b *buffer) writeFloat64WithPrecision(val float64, precision int) {
+	*b = strconv.AppendFloat(*b, val, 'f', precision, 64)
 }

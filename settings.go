@@ -20,6 +20,15 @@ const (
 	DefaultFlushIntervalS = 5
 	// DefaultLoggingSinkDisabled is the default behavior of logging sink suppression, default is false.
 	DefaultLoggingSinkDisabled = false
+	// DefaultUseReservoirTimer defines if all timers should be reservoir timers by default.
+	DefaultUseReservoirTimer = false
+	// FixedTimerReservoirSize is the max capacity of the reservoir for reservoir timers.
+	// note: needs to be rounded to a power of two e.g. 1 << bits.Len(uint(100)) = 128
+	// todo: see if it's worth an efficiency trade off to reduce tech debt of this magic number and allowing any number.
+	//       we could determine the difference between the defined size and next power of two
+	//       and use that to offset the counter when ANDing it against the mask,
+	//       once the result is 0 we just increment offset by "original offset"
+	FixedTimerReservoirSize = 128
 )
 
 // The Settings type is used to configure gostats. gostats uses environment
@@ -38,6 +47,8 @@ type Settings struct {
 	// Disable the LoggingSink when USE_STATSD is false and use the NullSink instead.
 	// This will cause all stats to be silently dropped.
 	LoggingSinkDisabled bool `envconfig:"GOSTATS_LOGGING_SINK_DISABLED" default:"false"`
+	// Make all timers reservoir timers with implied sampling under flush interval of FlushIntervalS
+	UseReservoirTimer bool `envconfig:"GOSTATS_USE_RESERVOIR_TIMER" default:"false"`
 }
 
 // An envError is an error that occurred parsing an environment variable
@@ -84,6 +95,7 @@ func envBool(key string, def bool) (bool, error) {
 }
 
 // GetSettings returns the Settings gostats will run with.
+// todo: can we optimize this by storing the result for subsequent calls
 func GetSettings() Settings {
 	useStatsd, err := envBool("USE_STATSD", DefaultUseStatsd)
 	if err != nil {
@@ -101,6 +113,10 @@ func GetSettings() Settings {
 	if err != nil {
 		panic(err)
 	}
+	useReservoirTimer, err := envBool("GOSTATS_USE_RESERVOIR_TIMER", DefaultUseReservoirTimer)
+	if err != nil {
+		panic(err)
+	}
 	return Settings{
 		UseStatsd:           useStatsd,
 		StatsdHost:          envOr("STATSD_HOST", DefaultStatsdHost),
@@ -108,6 +124,7 @@ func GetSettings() Settings {
 		StatsdPort:          statsdPort,
 		FlushIntervalS:      flushIntervalS,
 		LoggingSinkDisabled: loggingSinkDisabled,
+		UseReservoirTimer:   useReservoirTimer,
 	}
 }
 

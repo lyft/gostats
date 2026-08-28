@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"math/rand"
+	"os"
 	"reflect"
 	"strconv"
 	"strings"
@@ -125,6 +126,408 @@ func TestMilliTimer(t *testing.T) {
 	if !strings.Contains(timer, expected) {
 		t.Error("wanted timer value of test:420.000000|ms, got", timer)
 	}
+}
+
+func TestTimerReservoir_Disabled(t *testing.T) {
+	err := os.Setenv("GOSTATS_USE_RESERVOIR_TIMER", "false")
+	if err != nil {
+		t.Fatalf("Failed to set GOSTATS_USE_RESERVOIR_TIMER environment variable: %s", err)
+	}
+
+	statsToSend := FixedTimerReservoirSize * 3
+	expectedStatCount := statsToSend
+
+	ts, sink := setupTestNetSink(t, "tcp", false)
+	store := newStatStore(sink, true, GetSettings())
+
+	for i := 0; i < statsToSend; i++ {
+		store.NewTimer("test").AddValue(float64(i % 10))
+	}
+
+	if ts.String() != "" {
+		t.Errorf("Stats were written pre flush potentially clearing the reservoir too early")
+	}
+
+	store.Flush()
+
+	time.Sleep(1001 * time.Millisecond)
+
+	stats := strings.Split(ts.String(), "\n")
+	statCount := len(stats) - 1 // there will be 1 extra new line character at the end of the buffer
+	if statCount != expectedStatCount {
+		t.Errorf("Not all stats were written\ngot: %d\nwanted: %d", statCount, expectedStatCount)
+	}
+
+	stats = stats[:statCount]
+	for _, stat := range stats {
+		value := strings.Split(stat, ":")[1]
+		if strings.Contains(value, "|@") {
+			t.Errorf("A stat was written with a sample rate when it shouldn't have any: %s", stat)
+		}
+	}
+
+	os.Unsetenv("GOSTATS_USE_RESERVOIR_TIMER")
+}
+
+func TestTimerReservoir_Overflow(t *testing.T) {
+	err := os.Setenv("GOSTATS_USE_RESERVOIR_TIMER", "true")
+	if err != nil {
+		t.Fatalf("Failed to set GOSTATS_USE_RESERVOIR_TIMER environment variable: %s", err)
+	}
+
+	statsToSend := FixedTimerReservoirSize * 3
+	expectedStatCount := FixedTimerReservoirSize
+
+	ts, sink := setupTestNetSink(t, "tcp", false)
+	store := newStatStore(sink, true, GetSettings())
+
+	for i := 0; i < statsToSend; i++ {
+		store.NewTimer("test").AddValue(float64(i % 10))
+	}
+
+	if ts.String() != "" {
+		t.Errorf("Stats were written pre flush potentially clearing the reservoir too early")
+	}
+
+	store.Flush()
+
+	time.Sleep(1001 * time.Millisecond)
+
+	stats := strings.Split(ts.String(), "\n")
+	statCount := len(stats) - 1 // there will be 1 extra new line character at the end of the buffer
+	if statCount != expectedStatCount {
+		t.Errorf("Not all stats were written\ngot: %d\nwanted: %d", statCount, expectedStatCount)
+	}
+
+	stats = stats[:statCount]
+	for _, stat := range stats {
+		value := strings.Split(stat, ":")[1]
+		sampleRate := strings.Split(value, ("|@"))[1]
+		if sampleRate != "0.33" {
+			t.Errorf("A stat was written without a 0.33 sample rate: %s", stat)
+		}
+	}
+
+	os.Unsetenv("GOSTATS_USE_RESERVOIR_TIMER")
+}
+
+func TestTimerReservoir_Full(t *testing.T) {
+	err := os.Setenv("GOSTATS_USE_RESERVOIR_TIMER", "true")
+	if err != nil {
+		t.Fatalf("Failed to set GOSTATS_USE_RESERVOIR_TIMER environment variable: %s", err)
+	}
+
+	statsToSend := FixedTimerReservoirSize
+	expectedStatCount := statsToSend
+
+	ts, sink := setupTestNetSink(t, "tcp", false)
+	store := newStatStore(sink, true, GetSettings())
+
+	for i := 0; i < statsToSend; i++ {
+		store.NewTimer("test").AddValue(float64(i % 10))
+	}
+
+	if ts.String() != "" {
+		t.Errorf("Stats were written pre flush potentially clearing the reservoir too early")
+	}
+
+	store.Flush()
+
+	time.Sleep(1001 * time.Millisecond)
+
+	stats := strings.Split(ts.String(), "\n")
+	statCount := len(stats) - 1 // there will be 1 extra new line character at the end of the buffer
+	if statCount != expectedStatCount {
+		t.Errorf("Not all stats were written\ngot: %d\nwanted: %d", statCount, expectedStatCount)
+	}
+
+	stats = stats[:statCount]
+	for _, stat := range stats {
+		value := strings.Split(stat, ":")[1]
+		sampleRate := strings.Split(value, ("|@"))[1]
+		if sampleRate != "1.00" {
+			t.Errorf("A stat was written without a 1.00 sample rate: %s", stat)
+		}
+	}
+
+	os.Unsetenv("GOSTATS_USE_RESERVOIR_TIMER")
+}
+
+func TestTimerReservoir_NotFull(t *testing.T) {
+	err := os.Setenv("GOSTATS_USE_RESERVOIR_TIMER", "true")
+	if err != nil {
+		t.Fatalf("Failed to set GOSTATS_USE_RESERVOIR_TIMER environment variable: %s", err)
+	}
+
+	statsToSend := FixedTimerReservoirSize / 2
+	expectedStatCount := statsToSend
+
+	ts, sink := setupTestNetSink(t, "tcp", false)
+	store := newStatStore(sink, true, GetSettings())
+
+	for i := 0; i < statsToSend; i++ {
+		store.NewTimer("test").AddValue(float64(i % 10))
+	}
+
+	if ts.String() != "" {
+		t.Errorf("Stats were written pre flush potentially clearing the reservoir too early")
+	}
+
+	store.Flush()
+
+	time.Sleep(1001 * time.Millisecond)
+
+	stats := strings.Split(ts.String(), "\n")
+	statCount := len(stats) - 1 // there will be 1 extra new line character at the end of the buffer
+	if statCount != expectedStatCount {
+		t.Errorf("Not all stats were written\ngot: %d\nwanted: %d", statCount, expectedStatCount)
+	}
+
+	stats = stats[:statCount]
+	for _, stat := range stats {
+		value := strings.Split(stat, ":")[1]
+		sampleRate := strings.Split(value, ("|@"))[1]
+		if sampleRate != "1.00" {
+			t.Errorf("A stat was written without a 1.00 sample rate: %s", stat)
+		}
+	}
+
+	os.Unsetenv("GOSTATS_USE_RESERVOIR_TIMER")
+}
+
+func TestTimerReservoir_IndependantReservoirs(t *testing.T) {
+	err := os.Setenv("GOSTATS_USE_RESERVOIR_TIMER", "true")
+	if err != nil {
+		t.Fatalf("Failed to set GOSTATS_USE_RESERVOIR_TIMER environment variable: %s", err)
+	}
+
+	statsToSend := FixedTimerReservoirSize * 3
+	expectedStatCount := statsToSend
+
+	ts, sink := setupTestNetSink(t, "tcp", false)
+	store := newStatStore(sink, true, GetSettings())
+
+	for i := 0; i < statsToSend; i++ {
+		store.NewTimer("test" + strconv.Itoa(i)).AddValue(float64(i % 10)) // use different names so that we don't conflate the metrics into the same reservoir
+	}
+
+	if ts.String() != "" {
+		t.Errorf("Stats were written pre flush potentially clearing the reservoir too early")
+	}
+
+	store.Flush()
+
+	time.Sleep(1001 * time.Millisecond)
+
+	stats := strings.Split(ts.String(), "\n")
+	statCount := len(stats) - 1 // there will be 1 extra new line character at the end of the buffer
+	if statCount != expectedStatCount {
+		t.Errorf("Not all stats were written\ngot: %d\nwanted: %d", statCount, expectedStatCount)
+	}
+
+	stats = stats[:statCount]
+	for _, stat := range stats {
+		value := strings.Split(stat, ":")[1]
+		sampleRate := strings.Split(value, ("|@"))[1]
+		if sampleRate != "1.00" {
+			t.Errorf("A stat was written without a 1.00 sample rate: %s", stat)
+		}
+	}
+
+	os.Unsetenv("GOSTATS_USE_RESERVOIR_TIMER")
+}
+
+func TestTimerReservoir_ReusedStore(t *testing.T) {
+	err := os.Setenv("GOSTATS_USE_RESERVOIR_TIMER", "true")
+	if err != nil {
+		t.Fatalf("Failed to set GOSTATS_USE_RESERVOIR_TIMER environment variable: %s", err)
+	}
+
+	statsToSend := FixedTimerReservoirSize / 2
+	expectedStatCount := statsToSend
+
+	ts, sink := setupTestNetSink(t, "tcp", false)
+	store := newStatStore(sink, true, GetSettings())
+
+	for i := 0; i < statsToSend; i++ {
+		store.NewTimer("test").AddValue(float64(i % 10))
+	}
+
+	if ts.String() != "" {
+		t.Errorf("Stats were written pre flush potentially clearing the reservoir too early")
+	}
+
+	store.Flush()
+
+	time.Sleep(1001 * time.Millisecond)
+
+	stats := strings.Split(ts.Pull(), "\n")
+	statCount := len(stats) - 1 // there will be 1 extra new line character at the end of the buffer
+	if statCount != expectedStatCount {
+		t.Errorf("Not all stats were written\ngot: %d\nwanted: %d", statCount, expectedStatCount)
+	}
+
+	stats = stats[:statCount]
+	for _, stat := range stats {
+		value := strings.Split(stat, ":")[1]
+		sampleRate := strings.Split(value, ("|@"))[1]
+		if sampleRate != "1.00" {
+			t.Errorf("A stat was written without a 1.00 sample rate: %s", stat)
+		}
+	}
+
+	if ts.String() != "" {
+		t.Errorf("Sink hasn't been cleared")
+	}
+
+	statsToSend = FixedTimerReservoirSize
+	expectedStatCount = statsToSend
+
+	for i := 0; i < statsToSend; i++ {
+		store.NewTimer("test").AddValue(float64(i % 10))
+	}
+
+	if ts.String() != "" {
+		t.Errorf("Stats were written pre flush potentially clearing the reservoir too early")
+	}
+
+	store.Flush()
+
+	time.Sleep(1001 * time.Millisecond)
+
+	stats = strings.Split(ts.Pull(), "\n")
+	statCount = len(stats) - 1 // there will be 1 extra new line character at the end of the buffer
+	if statCount != expectedStatCount {
+		t.Errorf("Not all stats were written\ngot: %d\nwanted: %d", statCount, expectedStatCount)
+	}
+
+	stats = stats[:statCount]
+	for _, stat := range stats {
+		value := strings.Split(stat, ":")[1]
+		sampleRate := strings.Split(value, ("|@"))[1]
+		if sampleRate != "1.00" {
+			t.Errorf("A stat was written without a 1.00 sample rate: %s", stat)
+		}
+	}
+
+	os.Unsetenv("GOSTATS_USE_RESERVOIR_TIMER")
+}
+
+func TestTimerReservoir_AutomaticFlush(t *testing.T) {
+	err := os.Setenv("GOSTATS_USE_RESERVOIR_TIMER", "true")
+	if err != nil {
+		t.Fatalf("Failed to set GOSTATS_USE_RESERVOIR_TIMER environment variable: %s", err)
+	}
+
+	flushIntervalS := 5
+	expectedStatCount := FixedTimerReservoirSize * 2
+
+	ts, sink := setupTestNetSink(t, "tcp", false)
+	store := newStatStore(sink, true, GetSettings())
+
+	ctx, cancel := context.WithCancel(context.Background())
+
+	wg := &sync.WaitGroup{}
+
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		store.StartContext(ctx, time.NewTicker(time.Duration(flushIntervalS)*time.Second))
+	}()
+
+	// first reservoir timer
+	statsToSend := FixedTimerReservoirSize
+	for i := 0; i < statsToSend; i++ {
+		store.NewTimer("test1").AddValue(float64(i % 10))
+	}
+
+	// second reservoir timer
+	statsToSend = FixedTimerReservoirSize * 3
+	for i := 0; i < statsToSend; i++ {
+		store.NewTimer("test2").AddValue(float64(i % 10))
+	}
+
+	if ts.String() != "" {
+		t.Errorf("Stats were written pre flush invalidating the test")
+	}
+
+	time.Sleep(time.Duration(flushIntervalS+1) * time.Second) // increment a second to allow the flush to happen
+
+	stats := strings.Split(ts.String(), "\n")
+	statCount := len(stats) - 1 // there will be 1 extra new line character at the end of the buffer
+	if statCount != expectedStatCount {
+		t.Errorf("Not all stats were written\ngot: %d\nwanted: %d", statCount, expectedStatCount)
+	}
+
+	stats = stats[:statCount]
+	for _, stat := range stats {
+		name := strings.Split(stat, ":")[0]
+		value := strings.Split(stat, ":")[1]
+		sampleRate := strings.Split(value, ("|@"))[1]
+		if name == "test1" && sampleRate != "1.00" {
+			t.Errorf("The test1 stat was written without a 1.00 sample rate: %s", stat)
+		} else if name == "test2" && sampleRate != "0.33" {
+			t.Errorf("The test2 stat was written without a 0.33 sample rate: %s", stat)
+		} else if name != "test1" && name != "test2" {
+			t.Errorf("A unknown stat was written: %s", stat)
+		}
+	}
+
+	cancel()
+	wg.Wait()
+
+	os.Unsetenv("GOSTATS_USE_RESERVOIR_TIMER")
+}
+
+func TestTimerReservoir_ConcurrentFlushingWhileWrites(t *testing.T) {
+	err := os.Setenv("GOSTATS_USE_RESERVOIR_TIMER", "true")
+	if err != nil {
+		t.Fatalf("Failed to set GOSTATS_USE_RESERVOIR_TIMER environment variable: %s", err)
+	}
+
+	flushIntervalMS := 5
+	expectedStatCount := FixedTimerReservoirSize * 2
+
+	ts, sink := setupTestNetSink(t, "tcp", false)
+	store := newStatStore(sink, true, GetSettings())
+
+	ctx, cancel := context.WithCancel(context.Background())
+
+	wg := &sync.WaitGroup{}
+
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		store.StartContext(ctx, time.NewTicker(time.Duration(flushIntervalMS)*time.Millisecond))
+	}()
+
+	statsToSend := expectedStatCount
+	for i := 0; i < statsToSend; i++ {
+		store.NewTimer("test").AddValue(float64(i % 10))
+		time.Sleep(time.Duration(flushIntervalMS/5) * time.Millisecond)
+	}
+
+	time.Sleep(time.Duration(flushIntervalMS+1) * time.Millisecond) // guarantee we finish flushing
+
+	stats := strings.Split(ts.String(), "\n")
+	statCount := len(stats) - 1 // there will be 1 extra new line character at the end of the buffer
+	if statCount != expectedStatCount {
+		t.Errorf("Not all stats were written\ngot: %d\nwanted: %d", statCount, expectedStatCount)
+	}
+
+	stats = stats[:statCount]
+	for _, stat := range stats {
+		value := strings.Split(stat, ":")[1]
+		sampleRate := strings.Split(value, ("|@"))[1]
+		if sampleRate != "1.00" {
+			t.Errorf("The test1 stat was written without a 1.00 sample rate: %s", stat)
+		}
+	}
+
+	cancel()
+	wg.Wait()
+
+	os.Unsetenv("GOSTATS_USE_RESERVOIR_TIMER")
 }
 
 // Ensure 0 counters are not flushed

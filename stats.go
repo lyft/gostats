@@ -214,22 +214,34 @@ type StatGenerator interface {
 // NewStore returns an Empty store that flushes to Sink passed as an argument.
 // Note: the export argument is unused.
 func NewStore(sink Sink, _ bool) Store {
-	return &statStore{sink: sink}
+	return &statStore{
+		sink:      sink,
+		timerType: standard,
+	}
+}
+
+func newStatStore(sink Sink, export bool, conf Settings) *statStore {
+	store := NewStore(sink, export).(*statStore)
+	if conf.UseReservoirTimer {
+		store.timerType = reservoir
+	}
+	return store
 }
 
 // NewDefaultStore returns a Store with a TCP statsd sink, and a running flush timer.
+// note: this is the only way to use reservoir timers as they rely on the store flush loop
 func NewDefaultStore() Store {
 	var newStore Store
 	settings := GetSettings()
 	if !settings.UseStatsd {
 		if settings.LoggingSinkDisabled {
-			newStore = NewStore(NewNullSink(), false)
+			newStore = newStatStore(NewNullSink(), false, settings)
 		} else {
-			newStore = NewStore(NewLoggingSink(), false)
+			newStore = newStatStore(NewLoggingSink(), false, settings)
 		}
 		go newStore.Start(time.NewTicker(10 * time.Second))
 	} else {
-		newStore = NewStore(NewTCPStatsdSink(), false)
+		newStore = newStatStore(NewTCPStatsdSink(), false, settings)
 		go newStore.Start(time.NewTicker(time.Duration(settings.FlushIntervalS) * time.Second))
 	}
 	return newStore
@@ -298,30 +310,104 @@ func (c *gauge) Value() uint64 {
 	return atomic.LoadUint64(&c.value)
 }
 
-type timer struct {
+type timerType int
+
+const (
+	standard timerType = iota
+	reservoir
+)
+
+type timer interface {
+	time(time.Duration)
+	AddDuration(time.Duration)
+	AddValue(float64)
+	AllocateSpan() Timespan
+	Empty() ([]float64, uint64)
+}
+
+type standardTimer struct {
 	base time.Duration
 	name string
 	sink Sink
 }
 
-func (t *timer) time(dur time.Duration) {
+func (t *standardTimer) time(dur time.Duration) {
 	t.AddDuration(dur)
 }
 
-func (t *timer) AddDuration(dur time.Duration) {
+func (t *standardTimer) AddDuration(dur time.Duration) {
 	t.AddValue(float64(dur / t.base))
 }
 
-func (t *timer) AddValue(value float64) {
+func (t *standardTimer) AddValue(value float64) {
 	t.sink.FlushTimer(t.name, value)
 }
 
-func (t *timer) AllocateSpan() Timespan {
+func (t *standardTimer) AllocateSpan() Timespan {
 	return &timespan{timer: t, start: time.Now()}
 }
 
+// values are not collected for this timer
+func (t *standardTimer) Empty() ([]float64, uint64) {
+	return nil, 0
+}
+
+type reservoirTimer struct {
+	mu       sync.Mutex
+	base     time.Duration
+	name     string
+	ringSize uint64 // immutable
+	ringMask uint64 // immutable
+	values   []float64
+	count    uint64
+}
+
+func (t *reservoirTimer) time(dur time.Duration) {
+	t.AddDuration(dur)
+}
+
+func (t *reservoirTimer) AddDuration(dur time.Duration) {
+	t.AddValue(float64(dur / t.base))
+}
+
+func (t *reservoirTimer) AddValue(value float64) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+
+	t.values[t.count&t.ringMask] = value
+	t.count++
+}
+
+func (t *reservoirTimer) AllocateSpan() Timespan {
+	return &timespan{timer: t, start: time.Now()}
+}
+
+// resets the reservoir returning all valeus collected and a count of the total inflow,
+// including what exceeded the collection size and was dropped
+func (t *reservoirTimer) Empty() ([]float64, uint64) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+
+	count := t.count
+
+	var accumulation uint64
+	if count > t.ringSize {
+		accumulation = t.ringSize
+	} else {
+		accumulation = count
+	}
+
+	// make a copy to avoid data races
+	values := make([]float64, accumulation)
+	copy(values, t.values[:accumulation]) // since the slice memory is reused only copy what we accumulated in the current processing itteration
+
+	t.count = 0 // new values can start being written to the slice
+
+	return values, count
+}
+
 type timespan struct {
-	timer *timer
+	timer timer
 	start time.Time
 }
 
@@ -336,9 +422,11 @@ func (ts *timespan) CompleteWithDuration(value time.Duration) {
 }
 
 type statStore struct {
-	counters sync.Map
-	gauges   sync.Map
-	timers   sync.Map
+	// these maps may grow indefinitely however slots in this maps are reused as stats names are stable over the lifetime of the process
+	counters  sync.Map
+	gauges    sync.Map
+	timers    sync.Map
+	timerType timerType
 
 	mu             sync.RWMutex
 	statGenerators []StatGenerator
@@ -390,6 +478,26 @@ func (s *statStore) Flush() {
 
 	s.gauges.Range(func(key, v interface{}) bool {
 		s.sink.FlushGauge(key.(string), v.(*gauge).Value())
+		return true
+	})
+
+	s.timers.Range(func(key, v interface{}) bool {
+		if timer, ok := v.(*reservoirTimer); ok {
+			values, count := timer.Empty()
+			reservoirSize := timer.ringSize // assuming this is immutable
+
+			var sampleRate float64
+			if count <= reservoirSize {
+				sampleRate = 1.0
+			} else {
+				sampleRate = float64(reservoirSize) / float64(count)
+			}
+
+			for _, value := range values {
+				s.sink.FlushSampledTimer(key.(string), value, sampleRate)
+			}
+		}
+
 		return true
 	})
 
@@ -490,14 +598,35 @@ func (s *statStore) NewPerInstanceGauge(name string, tags map[string]string) Gau
 	return s.newGaugeWithTagSet(name, tagspkg.TagSet(nil).MergePerInstanceTags(tags))
 }
 
-func (s *statStore) newTimer(serializedName string, base time.Duration) *timer {
+func (s *statStore) newTimer(serializedName string, base time.Duration) timer {
 	if v, ok := s.timers.Load(serializedName); ok {
-		return v.(*timer)
+		return v.(timer)
 	}
-	t := &timer{name: serializedName, sink: s.sink, base: base}
+
+	var t timer
+	switch s.timerType {
+	case reservoir:
+		t = &reservoirTimer{
+			name:     serializedName,
+			base:     base,
+			ringSize: FixedTimerReservoirSize,
+			ringMask: FixedTimerReservoirSize - 1,
+			values:   make([]float64, FixedTimerReservoirSize),
+		}
+	case standard: // this should allow backward compatible a backwards compatible fallback as standard is the zero value of s.timerType
+		fallthrough
+	default:
+		t = &standardTimer{
+			name: serializedName,
+			sink: s.sink,
+			base: base,
+		}
+	}
+
 	if v, loaded := s.timers.LoadOrStore(serializedName, t); loaded {
-		return v.(*timer)
+		return v.(timer)
 	}
+
 	return t
 }
 

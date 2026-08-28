@@ -45,6 +45,12 @@ func (s *testStatSink) FlushTimer(name string, value float64) {
 	s.Unlock()
 }
 
+func (s *testStatSink) FlushSampledTimer(name string, value, sampleRate float64) {
+	s.Lock()
+	s.record += fmt.Sprintf("%s:%f|ms|@%f\n", name, value, sampleRate)
+	s.Unlock()
+}
+
 func TestCreateTimer(t *testing.T) {
 	sink := &testStatSink{}
 	store := NewStore(sink, true)

@@ -103,6 +103,12 @@ func (s *Sink) FlushTimer(name string, val float64) {
 	atomic.AddInt64(&p.count, 1)
 }
 
+// FlushSampledTimer implements the stats.Sink.FlushSampledTimer method and adds val to
+// stat name.
+func (s *Sink) FlushSampledTimer(name string, val, _ float64) {
+	s.FlushTimer(name, val)
+}
+
 // LoadCounter returns the value for stat name and if it was found.
 func (s *Sink) LoadCounter(name string) (uint64, bool) {
 	v, ok := s.counters().Load(name)

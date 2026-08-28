@@ -272,6 +272,14 @@ func (s *netTestSink) String() string {
 	return str
 }
 
+func (s *netTestSink) Pull() string {
+	s.mu.Lock()
+	str := s.buf.String()
+	s.buf.Reset()
+	s.mu.Unlock()
+	return str
+}
+
 func (s *netTestSink) Host(t testing.TB) string {
 	t.Helper()
 	host, _, err := net.SplitHostPort(s.conn.Address().String())

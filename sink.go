@@ -6,6 +6,7 @@ type Sink interface {
 	FlushCounter(name string, value uint64)
 	FlushGauge(name string, value uint64)
 	FlushTimer(name string, value float64)
+	FlushSampledTimer(name string, value, sampleRate float64)
 }
 
 // FlushableSink is an extension of Sink that provides a Flush() function that
