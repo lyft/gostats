@@ -16,6 +16,8 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/stretchr/testify/assert"
 )
 
 func foreverNow() time.Time {
@@ -665,12 +667,12 @@ func testNetSinkReconnect(t *testing.T, protocol string) {
 	// This test is flaky with UDP and the race detector, but good
 	// to have so we log instead of fail the test.
 	if protocol == "udp" {
-		stat := ts.WaitForStat(replaceFatalWithLog{t}, defaultRetryInterval*3)
+		stat := ts.WaitForStat(replaceFatalWithLog{t}, baseReconnectDelay*5)
 		if stat != "" && stat != expected {
 			t.Fatalf("stats got: %q want: %q", stat, expected)
 		}
 	} else {
-		stat := ts.WaitForStat(t, defaultRetryInterval*3)
+		stat := ts.WaitForStat(t, baseReconnectDelay*5)
 		if stat != expected {
 			t.Fatalf("stats got: %q want: %q", stat, expected)
 		}
@@ -719,7 +721,7 @@ func testNetSinkReconnectFailure(t *testing.T, protocol string) {
 	select {
 	case <-flushed:
 		// Ok
-	case <-time.After(defaultRetryInterval * 2):
+	case <-time.After(baseReconnectDelay * 5):
 		t.Fatalf("Only %d of %d Flush() calls succeeded",
 			atomic.LoadInt64(flushCount), N)
 	}
@@ -841,7 +843,7 @@ func testNetSinkIntegration(t *testing.T, protocol string) {
 			if err != nil {
 				t.Fatal(err)
 			}
-		case <-time.After(defaultRetryInterval * 2):
+		case <-time.After(baseReconnectDelay * 5):
 			t.Fatal("Timed out waiting for command to exit")
 		}
 	})
@@ -877,4 +879,36 @@ func BenchmarkFlushTimer(b *testing.B) {
 	for i := 0; i < b.N; i++ {
 		sink.FlushTimer("TestTImer.___f=i.__tag1=v1", float64(i)/3)
 	}
+}
+
+func TestCalculateNextSleep(t *testing.T) {
+	t.Parallel()
+
+	// 1. Test that the sleep duration is within the expected bounds.
+	// Run it a few times to get some randomness.
+	for i := 0; i < 100; i++ {
+		// Start with the base delay
+		d := calculateNextSleep(baseReconnectDelay)
+		assert.GreaterOrEqual(t, d, baseReconnectDelay)
+		assert.Less(t, d, baseReconnectDelay*3)
+
+		// Try with a larger previous delay
+		prev := 10 * time.Second
+		d = calculateNextSleep(prev)
+		assert.GreaterOrEqual(t, d, baseReconnectDelay)
+		assert.Less(t, d, prev*3)
+	}
+
+	// 2. Test the cap
+	d := calculateNextSleep(maxReconnectDelay)
+	assert.GreaterOrEqual(t, d, baseReconnectDelay)
+	assert.LessOrEqual(t, d, maxReconnectDelay)
+
+	// 3. Test edge case where prevSleep * 3 <= base.
+	// It should default back to the base.
+	d = calculateNextSleep(baseReconnectDelay / 3)
+	assert.Equal(t, baseReconnectDelay, d)
+
+	d = calculateNextSleep(0)
+	assert.Equal(t, baseReconnectDelay, d)
 }

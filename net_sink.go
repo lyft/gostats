@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"fmt"
 	"math"
+	"math/rand/v2"
 	"net"
 	"os"
 	"strconv"
@@ -23,9 +24,10 @@ type Logger interface {
 }
 
 const (
-	defaultRetryInterval = time.Second * 3
-	defaultDialTimeout   = defaultRetryInterval / 2
-	defaultWriteTimeout  = time.Second
+	baseReconnectDelay  = 3 * time.Second
+	maxReconnectDelay   = time.Minute
+	defaultDialTimeout  = baseReconnectDelay / 2
+	defaultWriteTimeout = time.Second
 
 	flushInterval           = time.Second
 	logOnEveryNDroppedBytes = 1 << 15 // Log once per 32kb of dropped stats
@@ -102,7 +104,8 @@ func NewNetSink(opts ...SinkOption) FlushableSink {
 		log: &loggingSink{writer: os.Stderr, now: time.Now},
 
 		// TODO (CEV): auto loading from the env is bad and should be removed.
-		conf: GetSettings(),
+		conf:           GetSettings(),
+		reconnectDelay: baseReconnectDelay,
 	}
 	for _, opt := range opts {
 		opt.apply(s)
@@ -129,15 +132,16 @@ func NewNetSink(opts ...SinkOption) FlushableSink {
 }
 
 type netSink struct {
-	conn         net.Conn
-	outc         chan *bytes.Buffer
-	retryc       chan *bytes.Buffer
-	mu           sync.Mutex
-	bufWriter    *bufio.Writer
-	doFlush      chan chan struct{}
-	droppedBytes uint64
-	log          Logger
-	conf         Settings
+	conn           net.Conn
+	outc           chan *bytes.Buffer
+	retryc         chan *bytes.Buffer
+	mu             sync.Mutex
+	bufWriter      *bufio.Writer
+	doFlush        chan chan struct{}
+	droppedBytes   uint64
+	log            Logger
+	conf           Settings
+	reconnectDelay time.Duration
 }
 
 type sinkWriter struct {
@@ -282,8 +286,6 @@ func (s *netSink) run() {
 	for {
 		if s.conn == nil {
 			if err := s.connect(addr); err != nil {
-				s.log.Warnf("connection error: %s", err)
-
 				// If the previous reconnect attempt failed, drain the flush
 				// queue to prevent Flush() from blocking indefinitely.
 				if reconnectFailed {
@@ -291,11 +293,20 @@ func (s *netSink) run() {
 				}
 				reconnectFailed = true
 
-				// TODO (CEV): don't sleep on the first retry
-				time.Sleep(defaultRetryInterval)
+				nextSleep := calculateNextSleep(s.reconnectDelay)
+
+				s.log.Warnf("connection error: %s, reconnecting in %s", err, nextSleep)
+				time.Sleep(nextSleep)
+				s.reconnectDelay = nextSleep
+
 				continue
 			}
+
+			if reconnectFailed {
+				s.log.Warnf("reconnected to %s", addr)
+			}
 			reconnectFailed = false
+			s.reconnectDelay = baseReconnectDelay
 		}
 
 		// Handle buffers that need to be retried first, if they exist.
@@ -418,4 +429,23 @@ func (b *buffer) WriteUnit64(val uint64) {
 
 func (b *buffer) WriteFloat64(val float64) {
 	*b = strconv.AppendFloat(*b, val, 'f', 6, 64)
+}
+
+func calculateNextSleep(prevSleep time.Duration) time.Duration {
+	// Decorrelated Jitter: sleep = min(cap, random_between(base, prev_sleep * 3))
+	upperBound := prevSleep * 3
+
+	var nextSleep time.Duration
+	if upperBound > baseReconnectDelay {
+		randomRange := upperBound - baseReconnectDelay
+		jitter := time.Duration(rand.Int64N(int64(randomRange)))
+		nextSleep = baseReconnectDelay + jitter
+	} else {
+		nextSleep = baseReconnectDelay
+	}
+
+	if nextSleep > maxReconnectDelay {
+		nextSleep = maxReconnectDelay
+	}
+	return nextSleep
 }
