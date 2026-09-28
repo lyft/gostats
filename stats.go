@@ -225,6 +225,7 @@ func NewStore(sink Sink, _ bool) Store {
 	return &statStore{
 		sink:              sink,
 		pruneAfterFlushes: pruneAfterFlushesFromEnv(),
+		debug:             newPruningDebug(),
 	}
 }
 
@@ -525,6 +526,9 @@ type statStore struct {
 	// so the public API can't hit this - it would take reaching into the
 	// unexported statStore directly, which only same-package code can do.
 	pruneAfterFlushes uint32
+
+	// TEMPORARY (OBSX-1114): see debug_pruning.go.
+	debug pruningDebug
 }
 
 var ReservedTagWords = map[string]bool{"asg": true, "az": true, "backend": true, "canary": true, "host": true, "period": true, "region": true, "shard": true, "window": true, "source": true, "project": true, "facet": true, "envoyservice": true}
@@ -564,6 +568,7 @@ func (s *statStore) Flush() {
 	}
 	s.mu.RUnlock()
 
+	var prunedCounters, prunedTimers uint64
 	s.counters.Range(func(key, v interface{}) bool {
 		c := v.(*counter)
 		// do not flush counters that are set to zero
@@ -597,7 +602,9 @@ func (s *statStore) Flush() {
 			s.sink.FlushCounter(key.(string), v)
 			atomic.StoreUint32(&c.idleFlushes, 0)
 			c.rejoin()
+			return true
 		}
+		prunedCounters++
 		return true
 	})
 
@@ -611,6 +618,7 @@ func (s *statStore) Flush() {
 			return true
 		}
 		s.timers.Delete(key)
+		prunedTimers++
 		return true
 	})
 
@@ -623,6 +631,8 @@ func (s *statStore) Flush() {
 	if ok {
 		flushableSink.Flush()
 	}
+
+	s.logPruning(prunedCounters, prunedTimers)
 }
 
 func (s *statStore) AddStatGenerator(statGenerator StatGenerator) {
