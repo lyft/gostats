@@ -20,6 +20,8 @@ const (
 	DefaultFlushIntervalS = 5
 	// DefaultLoggingSinkDisabled is the default behavior of logging sink suppression, default is false.
 	DefaultLoggingSinkDisabled = false
+	// DefaultPruneIdleSeconds is the default idle-pruning behavior: disabled.
+	DefaultPruneIdleSeconds = 0
 )
 
 // The Settings type is used to configure gostats. gostats uses environment
@@ -38,6 +40,10 @@ type Settings struct {
 	// Disable the LoggingSink when USE_STATSD is false and use the NullSink instead.
 	// This will cause all stats to be silently dropped.
 	LoggingSinkDisabled bool `envconfig:"GOSTATS_LOGGING_SINK_DISABLED" default:"false"`
+	// Number of seconds a Counter or Timer may go without being written to
+	// before it is pruned from the Store to bound memory growth from
+	// high-cardinality tags. 0 (the default) disables pruning.
+	PruneIdleSeconds int `envconfig:"GOSTATS_PRUNE_IDLE_SECONDS" default:"0"`
 }
 
 // An envError is an error that occurred parsing an environment variable
@@ -101,6 +107,10 @@ func GetSettings() Settings {
 	if err != nil {
 		panic(err)
 	}
+	pruneIdleSeconds, err := envInt("GOSTATS_PRUNE_IDLE_SECONDS", DefaultPruneIdleSeconds)
+	if err != nil {
+		panic(err)
+	}
 	return Settings{
 		UseStatsd:           useStatsd,
 		StatsdHost:          envOr("STATSD_HOST", DefaultStatsdHost),
@@ -108,6 +118,7 @@ func GetSettings() Settings {
 		StatsdPort:          statsdPort,
 		FlushIntervalS:      flushIntervalS,
 		LoggingSinkDisabled: loggingSinkDisabled,
+		PruneIdleSeconds:    pruneIdleSeconds,
 	}
 }
 
